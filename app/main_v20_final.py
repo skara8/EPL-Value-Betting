@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import queue
 import time
+import tkinter as tk
+from tkinter import ttk
 
 from main_v20 import V20App, LOGGER
 
@@ -13,6 +15,21 @@ class V20FinalApp(V20App):
         super()._create_vars()
         self._progress_queue: queue.Queue[tuple[int, str, str]] = queue.Queue()
         self._progress_drain_id = None
+
+    def _build_settings(self) -> None:
+        super()._build_settings()
+        note = ttk.LabelFrame(self.settings_tab, text="Crypto price sources", padding=12)
+        note.pack(fill="x", pady=(10, 0))
+        ttk.Label(
+            note,
+            text=(
+                "The targeted best-price pass also checks Stake and Cloudbet when those PulseScore feeds are available on your plan. "
+                "They are treated only as additional executable price sources. Polymarket remains fee-adjusted separately because it is an event market rather than a conventional fixed-odds bookmaker."
+            ),
+            wraplength=1260,
+            justify="left",
+            style="Muted.TLabel",
+        ).pack(anchor="w")
 
     def _progress_callback(self, percent: int, stage: str, detail: str) -> None:
         # Network work can run in more than one worker thread. Never call Tk
@@ -56,6 +73,21 @@ class V20FinalApp(V20App):
             eta = "estimating time remaining"
         self.loading_time_var.set(f"Elapsed {int(elapsed)}s · {eta}")
         self._progress_timer_id = self.after(500, self._update_progress_clock)
+
+    def _normalise_visible_copy(self) -> None:
+        super()._normalise_visible_copy()
+        # Earlier screens also expose explanatory copy through StringVars. A
+        # widget-level text sweep cannot see those values, so clean all dynamic
+        # user-facing strings as well. This leaves diagnostics logs untouched.
+        for value in self.__dict__.values():
+            if isinstance(value, tk.StringVar):
+                try:
+                    current = value.get()
+                    cleaned = self._clean_copy(current)
+                    if cleaned != current:
+                        value.set(cleaned)
+                except Exception:
+                    pass
 
 
 def main() -> None:
