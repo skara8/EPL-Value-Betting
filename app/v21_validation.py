@@ -43,6 +43,12 @@ CREATE INDEX IF NOT EXISTS idx_v21_decisions_kickoff ON v21_decisions(kickoff DE
 CREATE INDEX IF NOT EXISTS idx_v21_decisions_status ON v21_decisions(status, first_detected_at DESC);
 """
 
+# A manually refreshed desktop application cannot claim a true closing price
+# unless the captured Pinnacle quote is reasonably near kickoff. Six hours is
+# labelled a near-close benchmark; later versions can tighten this when an
+# automated scheduled snapshot collector exists.
+MAX_SHARP_CLOSE_MINUTES = 360.0
+
 
 @dataclass
 class V21ValidationSummary:
@@ -84,29 +90,12 @@ def save_v21_decisions(rows: Iterable[CombinedMatch], decisions: Iterable[V21Dec
             if row is None:
                 continue
             values = (
-                event_key(row),
-                row.kickoff.isoformat(),
-                d.league,
-                row.home_team,
-                row.away_team,
-                d.side,
-                d.selection,
-                now,
-                now,
-                d.quote_source,
-                d.quote_odds,
-                d.quote_source,
-                d.quote_odds,
-                d.model_probability,
-                d.conservative_probability,
-                d.model_ev_pct,
-                d.robust_ev_pct,
-                d.model_ev_pct,
-                d.robust_ev_pct,
-                d.source_count,
-                d.disagreement_pp,
-                d.confidence,
-                d.status,
+                event_key(row), row.kickoff.isoformat(), d.league,
+                row.home_team, row.away_team, d.side, d.selection,
+                now, now, d.quote_source, d.quote_odds, d.quote_source, d.quote_odds,
+                d.model_probability, d.conservative_probability,
+                d.model_ev_pct, d.robust_ev_pct, d.model_ev_pct, d.robust_ev_pct,
+                d.source_count, d.disagreement_pp, d.confidence, d.status,
             )
             before = con.total_changes
             con.execute(
@@ -137,10 +126,15 @@ def save_v21_decisions(rows: Iterable[CombinedMatch], decisions: Iterable[V21Dec
     return changed
 
 
-def _closing_pinnacle_odds(con: sqlite3.Connection, key: str, side: str, kickoff: str) -> Optional[float]:
+def _closing_pinnacle_quote(
+    con: sqlite3.Connection,
+    key: str,
+    side: str,
+    kickoff: str,
+) -> tuple[Optional[float], Optional[float]]:
     column = {"HOME": "pin_home", "DRAW": "pin_draw", "AWAY": "pin_away"}.get(side)
     if not column:
-        return None
+        return None, None
     kickoff_dt = _dt(kickoff)
     try:
         rows = con.execute(
@@ -149,16 +143,18 @@ def _closing_pinnacle_odds(con: sqlite3.Connection, key: str, side: str, kickoff
             (key,),
         ).fetchall()
     except sqlite3.OperationalError:
-        return None
+        return None, None
     for row in rows:
         captured = _dt(row["captured_at"])
         if captured is None:
             continue
         if kickoff_dt is None or captured <= kickoff_dt:
             odds = row["odds"]
-            if odds is not None and float(odds) > 1:
-                return float(odds)
-    return None
+            if odds is None or float(odds) <= 1:
+                continue
+            minutes = None if kickoff_dt is None else max(0.0, (kickoff_dt - captured).total_seconds() / 60.0)
+            return float(odds), minutes
+    return None, None
 
 
 def v21_validation_summary() -> V21ValidationSummary:
@@ -170,11 +166,11 @@ def v21_validation_summary() -> V21ValidationSummary:
         robust = [r for r in rows if r["status"] == "ROBUST +EV"]
         clvs: list[float] = []
         for row in robust:
-            close = _closing_pinnacle_odds(con, row["event_key"], row["side"], row["kickoff"])
-            if close is None:
+            close, minutes = _closing_pinnacle_quote(con, row["event_key"], row["side"], row["kickoff"])
+            if close is None or minutes is None or minutes > MAX_SHARP_CLOSE_MINUTES:
                 continue
-            # Positive means the originally observed execution price was higher
-            # than the last captured pre-kickoff Pinnacle price on the same side.
+            # Positive means the originally observed non-reference execution
+            # price was higher than a near-close Pinnacle quote on the same side.
             clvs.append((float(row["first_quote_odds"]) / close - 1.0) * 100.0)
 
         avg_clv = sum(clvs) / len(clvs) if clvs else None
