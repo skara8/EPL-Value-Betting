@@ -72,7 +72,8 @@ def save_research_features(
 ) -> int:
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     changed = 0
-    with _connect() as con:
+    con = _connect()
+    try:
         for row in rows:
             f = features.get(row.match_name)
             if f is None:
@@ -132,11 +133,14 @@ def save_research_features(
             if con.total_changes > before:
                 changed += 1
         con.commit()
-    return changed
+        return changed
+    finally:
+        con.close()
 
 
 def research_summary() -> V22ResearchSummary:
-    with _connect() as con:
+    con = _connect()
+    try:
         row = con.execute(
             """
             SELECT
@@ -148,10 +152,12 @@ def research_summary() -> V22ResearchSummary:
             FROM v22_research_features
             """
         ).fetchone()
-    return V22ResearchSummary(
-        snapshots=int(row[0] or 0),
-        high_quality=int(row[1] or 0),
-        with_elo=int(row[2] or 0),
-        with_poisson=int(row[3] or 0),
-        with_lineup=int(row[4] or 0),
-    )
+        return V22ResearchSummary(
+            snapshots=int(row[0] or 0),
+            high_quality=int(row[1] or 0),
+            with_elo=int(row[2] or 0),
+            with_poisson=int(row[3] or 0),
+            with_lineup=int(row[4] or 0),
+        )
+    finally:
+        con.close()
