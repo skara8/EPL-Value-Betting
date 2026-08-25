@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - feature/v1.6-context-dutch
+      - feature/v1.7-smart-dashboard
   workflow_dispatch:
 
 permissions:
@@ -52,7 +52,7 @@ jobs:
             --collect-all keyring `
             --collect-all tzdata `
             --hidden-import keyring.backends.Windows `
-            app/launcher_v16.py
+            app/launcher_v17.py
 
       - name: Install Inno Setup
         shell: pwsh
