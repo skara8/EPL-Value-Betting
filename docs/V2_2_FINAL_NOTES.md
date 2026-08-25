@@ -1,0 +1,1 @@
+V2.2 combines two performance changes with a validation-first research expansion: multicore CPU processes for numerical probability fitting, modest concurrent network price shopping, and experimental historical residual models that remain outside the primary Robust +EV gate until they prove incremental value.
