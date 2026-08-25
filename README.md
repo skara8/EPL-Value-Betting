@@ -32,7 +32,7 @@ A green `ROBUST +EV` signal requires:
 1. at least two external provider components;
 2. medium or high reference-market confidence;
 3. external disagreement no greater than 4 percentage points;
-4. the **least-favourable** external probability still produces EV at or above the configured threshold at the best observed price.
+4. the **least-favourable** external probability still produces EV at or above the configured threshold at the best observed eligible execution price.
 
 If the average model says +7% but the less optimistic reference says -1%, V2.1 no longer presents +7% as the main green signal. It becomes a watch/research case.
 
@@ -50,20 +50,22 @@ This is intentional: most public football information is eventually incorporated
 
 The fair probability is calculated before price shopping.
 
-V2.1 can then compare the same outcome across observed prices from Sportsbet, Polymarket and supported additional PulseScore feeds such as Bet365, Ladbrokes, TAB, Unibet AU, BetRight, Stake and Cloudbet.
+V2.1 can compare the same outcome across observed prices from Sportsbet, Polymarket and supported additional PulseScore feeds such as Bet365, Ladbrokes, TAB, Unibet AU, BetRight, Stake and Cloudbet.
 
 Changing from $1.90 to $2.02 can increase EV because the payout improved. It does not change the estimated chance of the team winning.
 
+Polymarket remains visible in Best Prices and the Dutch tools, but it is **not used as the execution price for the primary V2.1 robust signal** because Polymarket also contributes to the fair-probability model. This avoids using the same market partly as both the probability reference and the price being tested.
+
 ### 5. Sharp closing-line validation
 
-V2.1 stores the actual price source and odds that created each decision signal.
+V2.1 stores the actual non-reference price source and odds that created each decision signal.
 
-For robust signals it can compare that first observed execution price with the last captured pre-kickoff Pinnacle price on the same outcome.
+For robust signals it can compare that first observed execution price with the last captured pre-kickoff Pinnacle price on the same outcome. A Pinnacle quote only counts in the headline V2.1 sharp-CLV statistics when it was captured within **six hours of kickoff**; an older snapshot is not presented as a closing price.
 
 The new Research validation panel reports:
 
 - robust signals;
-- signals with a captured sharp close;
+- signals with a captured near-close sharp price;
 - average sharp CLV;
 - percentage with positive sharp CLV;
 - average robust EV when first flagged.
@@ -98,7 +100,7 @@ A review of public football-prediction repositories reinforced several useful le
 - log loss, Brier score and calibration matter more than simply predicting the winner;
 - bootstrap/ensemble uncertainty is useful for identifying unstable probabilities;
 - feature selection and ablation are necessary because adding more football variables can make out-of-sample performance worse;
-- xG, Elo, lineup continuity, fatigue and tactical features are promising **research candidates**, but should only enter the production probability correction after demonstrating incremental value;
+- xG, Elo, lineup continuity, fatigue, Dixon-Coles/time-decayed team strength and tactical features are promising **research candidates**, but should only enter the production probability correction after demonstrating incremental value;
 - all rolling football features must use only information available before kickoff.
 
 See `docs/V2_1_STRATEGY.md` for the detailed V2.1 research plan and the public repositories reviewed.
