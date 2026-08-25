@@ -61,16 +61,36 @@ class V21DecisionTests(unittest.TestCase):
     def test_price_shopping_can_improve_execution_without_changing_probability(self):
         row = self._row(model_p=0.52, conservative_p=0.48, odds=2.00)
         row.price_shop = SimpleNamespace(
-            best={
-                "HOME": SimpleNamespace(source="TAB", decimal_odds=2.20),
-                "DRAW": None,
-                "AWAY": None,
+            quotes={
+                "HOME": [
+                    SimpleNamespace(source="Sportsbet", decimal_odds=2.00),
+                    SimpleNamespace(source="TAB", decimal_odds=2.20),
+                ],
+                "DRAW": [],
+                "AWAY": [],
             }
         )
         decision = decision_for_side(row, "HOME", min_ev_pct=4.0)
         self.assertEqual(decision.quote_source, "TAB")
         self.assertAlmostEqual(decision.model_probability, 0.52)
         self.assertEqual(decision.status, "ROBUST +EV")
+
+    def test_polymarket_is_not_used_as_primary_execution_price_when_it_is_a_reference(self):
+        row = self._row(model_p=0.52, conservative_p=0.48, odds=2.00)
+        row.price_shop = SimpleNamespace(
+            quotes={
+                "HOME": [
+                    SimpleNamespace(source="Sportsbet", decimal_odds=2.00),
+                    SimpleNamespace(source="Polymarket", decimal_odds=2.50),
+                    SimpleNamespace(source="Ladbrokes", decimal_odds=2.10),
+                ],
+                "DRAW": [],
+                "AWAY": [],
+            }
+        )
+        decision = decision_for_side(row, "HOME", min_ev_pct=4.0)
+        self.assertEqual(decision.quote_source, "Ladbrokes")
+        self.assertAlmostEqual(decision.quote_odds, 2.10)
 
     def test_no_robust_edge_still_returns_highest_ev_for_dashboard_comparison(self):
         a = self._row(model_p=0.45, conservative_p=0.44, odds=2.00)
