@@ -1,5 +1,5 @@
 import v14_runtime_hook  # noqa: F401 - retain V1.4 parsing compatibility patch
-from main_v15 import main
+from main_v15_final import main
 
 
 if __name__ == "__main__":
