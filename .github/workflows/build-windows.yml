@@ -57,8 +57,8 @@ jobs:
       - name: Test frozen multicore worker startup
         shell: pwsh
         run: |
-          & .\dist\EPLValueBetting.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Frozen multicore self-test failed with exit code $LASTEXITCODE" }
+          $process = Start-Process -FilePath ".\dist\EPLValueBetting.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Frozen multicore self-test failed with exit code $($process.ExitCode)" }
 
       - name: Install Inno Setup
         shell: pwsh
