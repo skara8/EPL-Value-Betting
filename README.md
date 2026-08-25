@@ -4,40 +4,20 @@ Windows desktop research application for analysing EPL bookmaker prices, exchang
 
 ## Current version
 
-**V1.5.0**
+**V1.6.0**
 
-## V1.5 model architecture
+## Core market model
 
-V1.5 makes an important separation between the **price being tested** and the **probability model used to test it**.
+V1.6 retains the V1.5 architecture:
 
-### Sportsbet = target price
+- Sportsbet is the **target price**, not the fair-probability source used to assess itself.
+- Sportsbet 1X2 is de-vigged with the power method for bookmaker-shading diagnostics.
+- Polymarket executable YES asks are normalised to 100%.
+- Pinnacle/PS3838 1X2 is power-de-vigged when available.
+- Pinnacle Asian Handicap + total-goals prices can be converted into an implied Poisson score distribution.
+- Pinnacle 1X2 and Pinnacle AH information are combined into one provider component before combining with Polymarket.
 
-Sportsbet Home / Draw / Away odds are the executable bookmaker prices being evaluated.
-
-V1.5 calculates:
-
-- raw Sportsbet implied probabilities;
-- Sportsbet overround;
-- power-method Sportsbet de-vig probabilities;
-- the difference between Sportsbet's de-vig probability and the external model.
-
-Sportsbet's de-vig probability is a bookmaker-shading diagnostic. It does **not** vote in the fair probability used to calculate EV on Sportsbet's own price.
-
-### External probability model
-
-V1.5 can use:
-
-- Polymarket executable YES asks, normalised to 100%;
-- Pinnacle/PS3838 1X2 prices with margin removed using the power method;
-- Pinnacle Asian Handicap + goal-total prices converted into an implied Poisson score distribution.
-
-Pinnacle's 1X2 and AH estimates are combined into one Pinnacle provider component first, so one provider does not accidentally receive two full votes.
-
-The available external provider components are then averaged and renormalised into the V1.5 fair probability.
-
-### Expected value
-
-For a Sportsbet decimal price `O` and independent fair probability `p`:
+For Sportsbet decimal price `O` and independent fair probability `p`:
 
 ```text
 break-even probability = 1 / O
@@ -45,89 +25,126 @@ EV = p * O - 1
 price edge = p - (1 / O)
 ```
 
-### Conservative EV
+V1.5/V1.6 also calculates conservative EV using the least favourable external provider probability.
 
-V1.5 also calculates a deliberately harder number:
+## V1.6 Context Lab
 
-```text
-conservative probability = lowest probability among external provider components
-conservative EV = conservative probability * Sportsbet odds - 1
-```
+V1.6 adds a second, experimental contextual probability estimate **without replacing the base market model**.
 
-This helps distinguish an edge supported by multiple reference markets from one created by averaging disagreeing estimates.
+The contextual layer captures:
 
-## Asian Handicap and totals
+- player / expected line-up;
+- recent underlying performance;
+- tactical / style matchup;
+- manager / coaching matchup;
+- transfer / squad-change assessment;
+- schedule / rest / travel.
 
-V1.5 numerically calibrates an independent-Poisson football score model to the main full-time Asian Handicap and total-goals markets.
-
-The fitted model estimates:
-
-- expected home goals;
-- expected away goals;
-- Home / Draw / Away probabilities.
-
-Quarter handicap and total lines are settled as split bets, for example:
+The default research weights are deliberately conservative and **not fitted coefficients**:
 
 ```text
--0.25 = half 0, half -0.5
--0.75 = half -0.5, half -1.0
-Over 2.75 = half Over 2.5, half Over 3.0
+Player / expected line-up            35%
+Recent underlying performance        25%
+Tactical / style matchup             20%
+Manager / coaching matchup           10%
+Transfer / squad-change assessment    5%
+Schedule / rest / travel              5%
 ```
 
-Pinnacle AH + totals can contribute to the external fair model. If only Sportsbet AH + totals are available, the derived score model is labelled **SPORTSBET-DIAGNOSTIC** and is shown as a cross-market consistency check rather than being fed back into Sportsbet EV.
+Each factor is rated from `-3` (away advantage) to `+3` (home advantage). The resulting context layer is converted into a small softmax probability tilt. By default, the largest H/D/A probability movement is capped at **1.50 percentage points**.
 
-## Favourite-longshot and away-favourite research
+The GUI always shows:
 
-V1.5 tracks the football-market hypotheses discussed during development:
+- base V1.5 fair probability;
+- context-adjusted fair probability;
+- probability shift;
+- base EV;
+- context-adjusted EV.
+
+This makes the contextual model a transparent sensitivity analysis rather than an opaque way to manufacture positive EV.
+
+### Automatic player availability
+
+After a successful EPL odds fetch, V1.6 makes one optional request to the free public Fantasy Premier League bootstrap feed. It uses current player status and chance-of-playing fields to construct an availability proxy for each club.
+
+FPL player price/current performance fields are used only as rough player-importance proxies. The GUI displays the flagged players so the user can decide whether the signal is relevant to the selected fixture.
+
+### Transfers and managers
+
+V1.6 records transfer spending and manager names, but:
+
+- **transfer spend itself does not move the probability**;
+- raw manager-v-manager H2H does not automatically move the probability.
+
+The user separately rates whether the actual squad change or coaching/tactical matchup provides evidence of an advantage. Those judgements are saved for later backtesting.
+
+## V1.6 Dutch Calculator
+
+The new Dutch Calculator supports 2–6 selections and can use:
+
+- Sportsbet decimal odds;
+- Polymarket YES prices;
+- other decimal odds.
+
+For effective decimal odds `O_i` and total stake `T`:
+
+```text
+S = sum(1 / O_i)
+combined Dutch odds = 1 / S
+stake_i = T * (1 / O_i) / S
+equal return = T / S
+equal profit = T / S - T
+```
+
+If the selected outcomes cover the full mutually exclusive market:
+
+- `S < 1` → arbitrage / positive locked return;
+- `S = 1` → break-even;
+- `S > 1` → negative Dutch / locked loss.
+
+The GUI can automatically load:
+
+- Sportsbet H/D/A;
+- Polymarket H/D/A;
+- the best effective H/D/A price across Sportsbet and Polymarket.
+
+### Polymarket fees
+
+V1.6 can account for the current Polymarket sports taker-fee formula. For a YES price `p` and fee parameter `f`, the approximate effective winner decimal odds on a taker buy are:
+
+```text
+(1 - f * (1-p)) / p
+```
+
+The default sports `feeRate` parameter is 5%, but it is editable because market fee settings can change. Maker mode uses zero trading fee.
+
+The calculator does not model order-book slippage beyond the entered price. Arbitrage research requires genuinely executable prices and identical settlement rules across the selected markets.
+
+## Existing edge research
+
+V1.6 continues to track:
 
 - favourite-longshot bias;
 - away-favourite / possible home-field overpricing;
-- longshot caution.
+- market agreement/disagreement;
+- base model EV;
+- conservative EV;
+- Asian Handicap-implied expected goals;
+- closing-line research snapshots.
 
-These appear as research tags such as:
-
-- `FAVOURITE-LONGSHOT ALIGNMENT`
-- `AWAY-FAVOURITE`
-- `POSSIBLE HOME-ADVANTAGE OVERPRICE`
-- `LONGSHOT CAUTION`
-
-V1.5 deliberately does **not** add an arbitrary probability bonus for these effects. A numerical bias adjustment should be learned from the project's own historical outcomes and closing prices and then validated out-of-sample.
-
-## V1.5 edge signals
-
-- `PASS` — model EV below threshold.
-- `EDGE - SINGLE REFERENCE` — headline EV passes but only one external provider is available.
-- `EDGE - REFERENCE DISAGREEMENT` — headline EV passes but worst external reference does not remain positive EV.
-- `EDGE - DIVERGENT MARKETS` — external references disagree materially.
-- `ROBUST EDGE` — headline EV passes, conservative EV is positive and external references broadly agree.
-- `BIAS-ALIGNED ROBUST EDGE` — robust edge plus a favourite/away-favourite research tag.
-
-These are research classifications, not guarantees of profitability.
-
-## User interface
-
-V1.5 includes:
-
-- Dashboard with model-edge and conservative-EV summaries;
-- model-focused Matches table;
-- click-to-explain match calculations;
-- separate Outcome Calculations table for H/D/A;
-- Asian Handicap + expected-goals explanation;
-- Candidates view sorted by conservative EV;
-- **Edge Lab** showing every Home / Draw / Away outcome ranked by model and conservative EV;
-- persistent historical storage of V1.5 edge-model features;
-- existing V1.3/V1.4 history retained during upgrades;
-- built-in updater and Windows installer.
+Bias hypotheses remain tags rather than arbitrary probability bonuses.
 
 ## Research database
 
-User settings, logs and the SQLite research database are stored outside `Program Files` under:
+User settings, logs and SQLite research data are stored under:
 
 ```text
 %LOCALAPPDATA%\EPLValueBetting\
 ```
 
-V1.5 adds an `edge_model_snapshots` table containing all three outcomes for every fetched fixture, including the bookmaker probability, external model probability, conservative probability, EV, market residuals, bias tags and AH-model features.
+Existing V1.3–V1.5 history is retained.
+
+V1.6 adds `context_research_snapshots`, storing factor ratings, transfer-spend inputs, manager names, notes, automatic availability, base probabilities, context probabilities and context EV.
 
 ## Detailed methodology
 
@@ -135,9 +152,10 @@ See:
 
 ```text
 docs/MODEL_V1_5.md
+docs/MODEL_V1_6.md
 ```
 
-for the full modelling rationale and academic research references.
+for the modelling rationale, formulas and research references.
 
 ## Windows releases
 
@@ -146,8 +164,8 @@ Every successful build produces:
 - `EPL-Value-Betting-vX.Y.Z-Setup.exe`
 - `EPL-Value-Betting-vX.Y.Z-Portable.exe`
 
-When a tested version reaches `main`, GitHub Actions publishes the corresponding Release. The installed app can detect, download and launch the newer installer.
+When a tested version reaches `main`, GitHub Actions publishes the versioned Release. The installed application can detect and launch the newer installer.
 
 ## Important scope
 
-This project is a theoretical market-efficiency and probability-modelling application. It does not place bets automatically. An estimated positive EV is only as reliable as the probability model behind it; the purpose of the historical database is to test whether apparent edges persist out-of-sample.
+This project is a theoretical market-efficiency and probability-modelling application. It does not place bets automatically. Positive model EV is not proof of a persistent edge; the historical database exists so the model can ultimately be judged on calibration, closing-line value and out-of-sample performance.
