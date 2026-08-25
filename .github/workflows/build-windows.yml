@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/v2.2-cpu-research-models
+      - hotfix/v2.2.1-blue-import
   workflow_dispatch:
 
 permissions:
