@@ -16,15 +16,18 @@ ProgressCallback = Callable[[int, str, str], None]
 PAGE_LIMIT = 100
 CACHE_SECONDS = 900
 
-# Australian-facing bookmakers currently exposed through PulseScore's
-# normalised soccer API. They are used for price shopping only; they do not
-# change the independent fair-probability model.
+# Price-shopping sources currently exposed through PulseScore's normalised
+# soccer API. Australian-facing fixed-odds books and crypto sportsbooks are
+# used only to improve the executable price; they never vote in the independent
+# fair-probability model.
 BOOKMAKERS = (
     ("Bet365", "https://api.pulsescore.net/api/v3/bet365"),
     ("Ladbrokes", "https://api.pulsescore.net/api/ladbrokes"),
     ("TAB", "https://api.pulsescore.net/api/tab"),
     ("Unibet AU", "https://api.pulsescore.net/api/unibetau"),
     ("BetRight", "https://api.pulsescore.net/api/betright"),
+    ("Stake (crypto)", "https://api.pulsescore.net/api/stake"),
+    ("Cloudbet (crypto)", "https://api.pulsescore.net/api/cloudbet"),
 )
 
 
