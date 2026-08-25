@@ -4,6 +4,11 @@ from tkinter import ttk
 
 import main as base_main
 from config import DATA_DIR
+from engine import combine_sources, fetch_polymarket_epl, fetch_sportsbet_epl
+from advanced_market import enrich_rows
+from market_storage import save_market_context
+from edge_model import enrich_edge_model
+from edge_storage import save_edge_snapshot
 from main_v15 import V15App, LOGGER
 
 
@@ -29,7 +34,7 @@ class V15FinalApp(V15App):
         row += 1
         ttk.Label(left, text="Minimum Polymarket volume ($)").grid(row=row, column=0, sticky="w", pady=6)
         ttk.Entry(left, textvariable=self.min_volume_var, width=12).grid(row=row, column=1, sticky="w", padx=(14, 8), pady=6)
-        ttk.Label(left, text="Retained as a research-quality setting. Volume is displayed beside candidates; zero disables the threshold.", style="Muted.TLabel").grid(row=row, column=2, sticky="w")
+        ttk.Label(left, text="0 disables the filter. Passing edges below this volume are labelled EDGE - LOW PM VOLUME.", style="Muted.TLabel").grid(row=row, column=2, sticky="w")
 
         row += 1
         ttk.Label(left, text="Default days ahead").grid(row=row, column=0, sticky="w", pady=6)
@@ -72,6 +77,69 @@ class V15FinalApp(V15App):
             wraplength=1280,
             justify="left",
         ).pack(anchor="w")
+
+    def _fetch_worker(self, api_key, start, end, min_ev) -> None:
+        warnings: list[str] = []
+        info_notes: list[str] = []
+        try:
+            try:
+                sb_rows = fetch_sportsbet_epl(api_key, start, end)
+            except Exception as exc:
+                sb_rows = []
+                warnings.append(f"Sportsbet: {exc}")
+                LOGGER.exception("Sportsbet fetch failed")
+
+            try:
+                pm_rows = fetch_polymarket_epl(start, end)
+            except Exception as exc:
+                pm_rows = []
+                warnings.append(f"Polymarket: {exc}")
+                LOGGER.exception("Polymarket fetch failed")
+
+            rows = combine_sources(sb_rows, pm_rows, min_ev_pct=min_ev)
+            rows, advanced_notes = enrich_rows(rows, api_key, start, end)
+            rows = enrich_edge_model(rows, min_ev_pct=min_ev)
+
+            for note in advanced_notes:
+                if note.startswith("INFO:"):
+                    info_notes.append(note[5:].strip())
+                else:
+                    warnings.append(note)
+
+            # Apply the existing user-configurable Polymarket volume quality
+            # threshold to V1.5 edge labels before data is persisted.
+            min_volume = max(0.0, base_main.safe_float(self.min_volume_var.get(), 0.0))
+            if min_volume > 0:
+                for row in rows:
+                    if row.polymarket_volume is None or row.polymarket_volume < min_volume:
+                        for edge in getattr(row, "edge_outcomes", {}).values():
+                            if edge.model_ev_pct is not None and edge.model_ev_pct >= min_ev:
+                                edge.signal = "EDGE - LOW PM VOLUME"
+                                edge.confidence = "LOW"
+                        best = getattr(row, "edge_outcomes", {}).get(getattr(row, "edge_best_selection", ""))
+                        if best is not None:
+                            row.edge_signal = best.signal
+                            row.edge_confidence = best.confidence
+
+            saved = context_saved = edge_saved = 0
+            if self.save_snapshots_var.get() and rows:
+                saved = base_main.save_snapshot(rows)
+                context_saved = save_market_context(rows)
+                edge_saved = save_edge_snapshot(rows)
+                LOGGER.info(
+                    "Saved %d base, %d context and %d edge rows",
+                    saved, context_saved, edge_saved,
+                )
+
+            self.after(
+                0,
+                lambda: self._apply_fetch_result_v15(
+                    rows, warnings, info_notes, saved, context_saved, edge_saved
+                ),
+            )
+        except Exception as exc:
+            LOGGER.exception("Unexpected V1.5 fetch worker failure")
+            self.after(0, lambda: self._fatal_fetch_error(exc))
 
 
 def main() -> None:
