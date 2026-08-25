@@ -1,32 +1,72 @@
-# EPL Value Betting
+# Football Value Betting
 
-Windows desktop research application for analysing EPL bookmaker prices, exchange probabilities, Asian Handicap markets, football context and market-efficiency hypotheses.
+Windows desktop research application for comparing football prices, estimating fair probabilities, studying market inefficiencies and validating whether apparent edges persist.
 
 ## Current version
 
-**V1.8.0**
+**V2.0.0**
 
-## What V1.8 adds
+## What V2 changes
 
-V1.8 keeps the simple V1.7 decision-first Dashboard while substantially expanding the analysis that runs underneath it.
+V2 keeps the existing probability model but substantially improves the user experience and price-comparison layer.
 
-New modelling layers:
+### Live analysis progress
 
-- expected XI estimation;
-- position-group player-strength proxies;
-- recent xG/xGA and underlying-performance analysis;
-- tactical/style profile and matchup signals;
-- automatic rest/schedule signal;
-- persistent recommendation tracking;
-- completed-result ingestion;
-- last-observed pre-kickoff price / closing-line-value research;
-- flat-stake ROI, calibration and Brier-score validation.
+A refresh can now involve a large number of market and football-data requests. The Dashboard therefore shows a live analysis panel with:
 
-The Dashboard remains simple: **best theoretical edge, price, EV, confidence and one short explanation**.
+- current stage;
+- plain-English explanation of what is happening;
+- progress percentage;
+- elapsed time;
+- approximate time remaining.
 
-## Core market model remains the anchor
+Typical stages are:
 
-Sportsbet is the target price, not the independent probability source used to assess itself.
+```text
+Sportsbet league eligibility
+→ Sportsbet fixtures
+→ Polymarket + Pinnacle references
+→ fixture matching
+→ Asian Handicap + totals
+→ fair-probability / EV model
+→ best-price scan
+→ research snapshot saving
+→ optional EPL player/xG/tactical enrichment
+```
+
+Core market results become usable before the optional EPL football-intelligence layer finishes.
+
+## Condensed navigation
+
+The old collection of many top-level tabs is grouped into six main areas:
+
+```text
+Dashboard
+Markets
+Analysis
+Tools
+Research
+Settings
+```
+
+Detailed pages are still available underneath:
+
+- **Markets:** Matches, League coverage, Best prices;
+- **Analysis:** Candidates, Market edge, Team context, Football model;
+- **Tools:** Dutch calculator;
+- **Research:** Validation, History, Diagnostics.
+
+This keeps the detailed calculations auditable without making the first-level navigation crowded.
+
+## Dynamic multi-league coverage
+
+Sportsbet remains the eligibility gate.
+
+The app asks PulseScore for Sportsbet's current soccer league catalogue, then analyses complete pre-match 90-minute H/D/A markets inside the selected date range. Polymarket and Pinnacle are independent reference markets only; they cannot introduce a competition that Sportsbet does not offer.
+
+## Core probability model
+
+Sportsbet is a target price, not the independent probability source used to assess itself.
 
 The fair-probability layer can use:
 
@@ -34,217 +74,92 @@ The fair-probability layer can use:
 - Pinnacle/PS3838 power-de-vigged 1X2;
 - Pinnacle Asian Handicap + total-goals information converted into an implied Poisson score distribution.
 
-For Sportsbet decimal price `O` and independent fair probability `p`:
+For decimal price `O` and independent fair probability `p`:
 
 ```text
 break-even probability = 1 / O
 EV = p * O - 1
 ```
 
-Sportsbet is separately power-de-vigged for bookmaker-shading/bias diagnostics, but does not vote in its own fair probability.
+Sportsbet is separately power-de-vigged for bookmaker-shading and bias research, but does not vote in its own fair probability.
 
-## V1.8 football intelligence
+The existing favourite-longshot, away-favourite, conservative-EV, market-disagreement, AH/totals and context logic remains intact.
 
-### Expected XI
+## Best-price comparison
 
-V1.8 estimates the likely XI from free current FPL player data plus recent FotMob starting line-ups where available.
+After the core model identifies the leading model-priced matches, V2 optionally performs a smaller price-shopping pass.
 
-The start-probability proxy considers:
+Default additional PulseScore sources are:
 
-- recent starts;
-- minutes;
-- recency of starts;
-- current chance of playing.
+- Bet365;
+- Ladbrokes;
+- TAB;
+- Unibet AU;
+- BetRight.
 
-The player-strength proxy uses current role, position-relative FPL price, selected performance fields, availability and recent match rating where available.
+Sportsbet is already present in the core data. Polymarket is also included as a fee-adjusted event-market price using the same taker-fee assumption as the Dutch calculator.
 
-The GUI displays:
+The price scan deliberately does **not** download every event from every bookmaker. It shops up to 15 leading matches across up to five leagues, and caches bookmaker league/event responses for 15 minutes. This reduces both waiting time and use of PulseScore's request allowance.
 
-- expected player;
-- position;
-- estimated start chance;
-- strength proxy;
-- recent starts;
-- recent rating;
-- availability.
+### Important modelling rule
 
-These are research proxies, not official player ratings or confirmed line-ups.
+Price shopping does not change the model probability.
 
-### Recent underlying performance
-
-Up to five recent league matches are recency-weighted using available:
-
-- xG / xGA;
-- shots;
-- shots on target;
-- big chances;
-- goals;
-- possession;
-- corners.
-
-The form score deliberately gives more weight to chance-quality information than to raw wins/losses.
-
-### Tactical/style profiles
-
-V1.8 derives transparent profile descriptions such as:
-
-- possession control;
-- lower-possession / transition;
-- high shot volume;
-- high chance quality;
-- set-piece / territory threat;
-- strong defensive suppression;
-- open-game profile.
-
-It does not claim to measure pressing intensity without pressure/PPDA data.
-
-The tactical-matchup rating compares recent chance creation, opponent suppression, shot quality and set-piece territory.
-
-### Rest/schedule
-
-The most recent completed match is compared with the upcoming fixture to identify meaningful rest differences. This receives only a small weight.
-
-## Free-source architecture
-
-V1.8 adds no new paid sports-data subscription.
-
-It uses:
-
-- **Fantasy Premier League public bootstrap data** for current player/squad information;
-- **FotMob public web JSON** as an optional source for recent EPL match details such as xG, line-ups and formations.
-
-FotMob is treated as an optional, unofficial dependency:
-
-- failure never stops the core market model;
-- responses are cached locally;
-- finished-match details are cached for seven days;
-- detailed requests are capped and spaced out.
-
-## Context remains deliberately small
-
-The automatic football layer feeds the existing V1.6/V1.7 context model rather than replacing the market model.
-
-The existing default context weights remain:
+If the model estimates an outcome at 55%:
 
 ```text
-Player / expected line-up             35%
-Recent underlying performance         25%
-Tactical / style matchup              20%
-Manager / coaching                    10%
-Transfer / squad change                5%
-Schedule / rest / travel               5%
+Sportsbet $1.80 → EV = -1.0%
+TAB $1.92       → EV = +5.6%
 ```
 
-The total contextual probability movement remains capped — default **1.50 percentage points**.
+The probability stayed at 55%. Only the available payout changed.
 
-### Recommendation guardrail
+The Best prices page shows:
 
-To appear on the Dashboard:
+- league and match;
+- outcome;
+- model fair probability;
+- Sportsbet odds;
+- best observed odds;
+- source offering the best price;
+- EV at Sportsbet;
+- EV at the best observed price;
+- EV improvement from price shopping.
 
-```text
-base independent-market EV >= 0%
-AND
-V1.8 adjusted EV >= configured minimum EV
-```
+If an additional bookmaker is unavailable on the user's PulseScore plan, that source is skipped and the rest of the analysis continues.
 
-So football context can confirm, trim or slightly strengthen an existing market idea, but cannot rescue a clearly negative market bet.
+## Dashboard behaviour
 
-## Football Model tab
+The Dashboard shows the strongest current theoretical edge in simple language.
 
-V1.8 adds a detailed **Football Model** tab for users who want to inspect the backend evidence.
+If a qualifying +EV option exists, it shows the best observed price available from the sources actually checked.
 
-It includes:
+If nothing clears the configured recommendation threshold, the Dashboard still shows the highest-EV available option and labels it honestly as either:
 
-- simple automatic matchup lean;
-- data-quality rating;
-- expected XI for both clubs;
-- overall and position-group player strength;
-- likely recent formation;
-- rolling xG/xGA;
-- shots/SOT;
-- possession;
-- tactical labels;
-- recent match-by-match underlying data.
+- positive EV but below threshold; or
+- negative EV and shown only because it is the least-negative option.
 
-This keeps the Dashboard uncluttered while making the reasoning auditable.
+The app never silently relabels a negative-EV selection as a recommendation.
 
-## Validation tab
+## Football intelligence
 
-V1.8 starts measuring whether the model actually works rather than only generating EV estimates.
+The automatic expected-XI, player-strength, recent xG-style form, tactical matchup and rest model remains EPL-specific for now. Other leagues use the same market model without fabricated team-context data.
 
-When an outcome first qualifies for the Dashboard, V1.8 stores its original:
-
-- Sportsbet price;
-- model probability;
-- base EV;
-- context-adjusted EV;
-- conservative EV;
-- market confidence;
-- football-data quality;
-- expected-XI/form/tactical/rest ratings.
-
-Completed results are then matched back to the recommendation.
-
-### Closing-line value
-
-The app compares the first flagged price with the **last Sportsbet price actually stored before kick-off**.
-
-Timing is labelled honestly:
-
-- `CLOSE` — within 90 minutes;
-- `NEAR CLOSE` — within six hours;
-- `LAST OBSERVED` — older;
-- `UNKNOWN` — no timing available.
-
-The app does not call an old snapshot a true close.
-
-Price CLV is:
-
-```text
-CLV % = flagged odds / last observed pre-kickoff odds - 1
-```
-
-Positive CLV means the later market price moved in the same direction as the original model view.
-
-### Research metrics
-
-Validation reports:
-
-- number of recommendations;
-- number settled;
-- flat-stake ROI;
-- average CLV;
-- positive-CLV rate;
-- binary Brier score;
-- close/near-close sample count.
-
-Small samples are descriptive only.
+The football layer remains deliberately capped so it can nudge a market-supported estimate but cannot dominate the independent market evidence.
 
 ## Dutch analysis
 
-The full Dutch Calculator remains unchanged and the Dashboard still automatically checks the best effective H/D/A prices across Sportsbet and Polymarket.
+The Dutch Calculator remains available under **Tools**. It can use Sportsbet decimal odds or Polymarket prices, including the configured Polymarket sports taker-fee treatment.
 
-It can surface:
+The Dashboard can still surface a full-market arbitrage or a model-based partial Dutch when appropriate.
 
-- full-market arbitrage; or
-- a positive-model-EV two-result partial Dutch.
+## Validation
 
-Partial Dutch ideas remain clearly labelled as non-arbitrage because an uncovered outcome can lose the entire outlay.
+The Research section retains recommendation history, completed results, flat-stake ROI, Brier-score calibration and last-observed pre-kickoff price / CLV analysis.
 
-## Existing research features retained
+These metrics are intended to test whether the model is genuinely useful rather than assuming a displayed positive EV is real.
 
-V1.8 retains:
-
-- favourite-longshot research tags;
-- away-favourite / possible home-field overpricing tags;
-- market agreement/disagreement;
-- model EV and conservative EV;
-- Asian Handicap-implied expected goals;
-- manual manager/transfer/tactical research inputs;
-- historical SQLite storage;
-- Windows installer and built-in updater.
-
-## Research data
+## Data and settings
 
 User settings, logs, cached public football data and SQLite research data live under:
 
@@ -252,28 +167,8 @@ User settings, logs, cached public football data and SQLite research data live u
 %LOCALAPPDATA%\EPLValueBetting\
 ```
 
-Existing data from earlier versions is retained through upgrades.
-
-## Methodology
-
-See:
-
-```text
-docs/MODEL_V1_5.md
-docs/MODEL_V1_6.md
-docs/MODEL_V1_7.md
-docs/MODEL_V1_8.md
-```
-
-## Windows releases
-
-Every tested release produces:
-
-- `EPL-Value-Betting-vX.Y.Z-Setup.exe`
-- `EPL-Value-Betting-vX.Y.Z-Portable.exe`
-
-When a tested version reaches `main`, GitHub Actions publishes the versioned Release and the installed application can detect the update.
+Existing research data is retained across upgrades.
 
 ## Scope
 
-This is a theoretical market-efficiency and probability-modelling application. It does not place bets automatically. Positive model EV is not proof of a persistent edge. V1.8 is specifically designed to accumulate the closing-line, calibration and result evidence needed to test whether the apparent edge survives out-of-sample.
+This is a theoretical market-efficiency and probability-modelling project. It does not automatically place bets. A positive model EV is an estimate, not a guarantee, and should ultimately be judged through calibration, closing-line value and out-of-sample results.
