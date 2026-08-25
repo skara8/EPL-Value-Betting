@@ -11,9 +11,9 @@ from engine import CombinedMatch
 
 FPL_BOOTSTRAP = "https://fantasy.premierleague.com/api/bootstrap-static/"
 
-# These are research weights, not fitted coefficients.  They only determine
-# how much each contextual judgement contributes to a small capped probability
-# tilt.  The base V1.5 market model remains visible and untouched.
+# These are research weights, not fitted coefficients. They determine how much
+# each contextual judgement contributes to a small capped probability tilt.
+# The independent V1.5 market model remains visible and untouched.
 FACTOR_WEIGHTS = {
     "player_lineup": 0.35,
     "recent_performance": 0.25,
@@ -32,6 +32,8 @@ FACTOR_LABELS = {
     "schedule_rest": "Schedule / rest / travel",
 }
 
+POSITIONS = ("GKP", "DEF", "MID", "FWD")
+
 
 @dataclass
 class FPLPlayerAvailability:
@@ -49,7 +51,9 @@ class FPLTeamContext:
     available_players: int = 0
     doubtful_players: int = 0
     unavailable_players: int = 0
+    ignored_departures: int = 0
     availability_penalty: float = 0.0
+    position_penalty: dict[str, float] = field(default_factory=lambda: {p: 0.0 for p in POSITIONS})
     strength_home: Optional[float] = None
     strength_away: Optional[float] = None
     attack_home: Optional[float] = None
@@ -122,12 +126,41 @@ def _player_chance(player: dict[str, Any]) -> float:
     return max(0.0, min(1.0, _safe_number(raw) / 100.0))
 
 
-def fetch_fpl_team_context() -> dict[str, FPLTeamContext]:
-    """Fetch free public FPL bootstrap data and summarise team availability.
+def _is_departed_player_news(news: str) -> bool:
+    """True when FPL news clearly describes a player no longer in the squad.
 
-    FPL player prices and performance fields are used only as a rough proxy for
-    how important an unavailable player might be; this output is a contextual
-    research signal, not a standalone football probability model.
+    FPL can retain transferred or loaned-out players in bootstrap data. Those
+    players are not injuries and must not create an availability penalty.
+    """
+    text = (news or "").strip().lower()
+    if not text:
+        return False
+    phrases = (
+        "has joined ",
+        "have joined ",
+        "joined permanently",
+        "joined on loan",
+        "on loan for the rest",
+        "on loan until",
+        "loaned to ",
+        "has signed for ",
+        "signed permanently",
+        "has returned to ",
+        "returned to ",
+        "has left the club",
+        "left the club",
+        "transferred to ",
+        "permanently transferred",
+    )
+    return any(phrase in text for phrase in phrases)
+
+
+def fetch_fpl_team_context() -> dict[str, FPLTeamContext]:
+    """Fetch free public FPL bootstrap data and summarise current availability.
+
+    FPL player prices/performance are only a rough proxy for player importance.
+    Clear transfer/loan departures are ignored so stale squad records cannot be
+    mistaken for injuries.
     """
     payload = engine.get_json(FPL_BOOTSTRAP, provider_name="Fantasy Premier League")
     teams = payload.get("teams") if isinstance(payload, dict) else None
@@ -159,14 +192,14 @@ def fetch_fpl_team_context() -> dict[str, FPLTeamContext]:
     for player in players:
         if not isinstance(player, dict):
             continue
+        news = str(player.get("news") or "").strip()
+        if _is_departed_player_news(news):
+            continue
         position = _position_name(player.get("element_type"))
         price = _safe_number(player.get("now_cost")) / 10.0
         if position in by_position_prices and price > 0:
             by_position_prices[position].append(price)
-    medians = {
-        pos: (median(values) if values else 5.0)
-        for pos, values in by_position_prices.items()
-    }
+    medians = {pos: (median(values) if values else 5.0) for pos, values in by_position_prices.items()}
 
     for player in players:
         if not isinstance(player, dict):
@@ -175,6 +208,11 @@ def fetch_fpl_team_context() -> dict[str, FPLTeamContext]:
         if not canonical or canonical not in contexts:
             continue
         ctx = contexts[canonical]
+        news = str(player.get("news") or "").strip()
+        if _is_departed_player_news(news):
+            ctx.ignored_departures += 1
+            continue
+
         chance = _player_chance(player)
         status = str(player.get("status") or "a").lower()
         position = _position_name(player.get("element_type"))
@@ -201,6 +239,8 @@ def fetch_fpl_team_context() -> dict[str, FPLTeamContext]:
 
         loss = importance * (1.0 - chance)
         ctx.availability_penalty += loss
+        if position in ctx.position_penalty:
+            ctx.position_penalty[position] += loss
         if chance < 0.999:
             ctx.unavailable.append(
                 FPLPlayerAvailability(
@@ -208,7 +248,7 @@ def fetch_fpl_team_context() -> dict[str, FPLTeamContext]:
                     position=position,
                     status=status,
                     chance=chance,
-                    news=str(player.get("news") or "").strip(),
+                    news=news,
                     importance=importance,
                 )
             )
@@ -218,16 +258,24 @@ def fetch_fpl_team_context() -> dict[str, FPLTeamContext]:
     return contexts
 
 
-def availability_rating(
-    home: Optional[FPLTeamContext], away: Optional[FPLTeamContext]
-) -> float:
+def availability_rating(home: Optional[FPLTeamContext], away: Optional[FPLTeamContext]) -> float:
     """Return -3..+3; positive means relative player availability favours home."""
     if home is None or away is None:
         return 0.0
-    # A roughly two-important-player difference should be near the end of the
-    # context scale, but the final probability movement remains separately capped.
     difference = away.availability_penalty - home.availability_penalty
     return max(-3.0, min(3.0, difference * 1.25))
+
+
+def biggest_position_gap(home: Optional[FPLTeamContext], away: Optional[FPLTeamContext]) -> tuple[str, float]:
+    """Return the position with the largest penalty gap; positive favours home."""
+    if home is None or away is None:
+        return "", 0.0
+    gaps = {
+        position: away.position_penalty.get(position, 0.0) - home.position_penalty.get(position, 0.0)
+        for position in POSITIONS
+    }
+    position = max(gaps, key=lambda p: abs(gaps[p]))
+    return position, gaps[position]
 
 
 # ---------------------------------------------------------------------------
@@ -253,8 +301,6 @@ def weighted_context_score(inputs: ContextInputs, auto_availability: float = 0.0
 
 
 def _softmax_tilt(probs: tuple[float, float, float], theta: float) -> tuple[float, float, float]:
-    # Positive theta favours HOME; negative theta favours AWAY.  Draw remains
-    # neutral before renormalisation.
     h, d, a = probs
     raw = (h * math.exp(theta), d, a * math.exp(-theta))
     total = sum(raw)
@@ -266,12 +312,6 @@ def apply_context_tilt(
     weighted_score: float,
     max_shift_pp: float = 1.50,
 ) -> tuple[float, float, float]:
-    """Tilt H/D/A while capping the largest probability movement.
-
-    weighted_score is naturally around -3..+3.  At +/-3 the largest outcome
-    probability shift is capped at max_shift_pp.  This makes V1.6's contextual
-    layer deliberately subordinate to the market model.
-    """
     total = sum(base_probs)
     if total <= 0:
         raise ValueError("Base probabilities must have positive mass.")
@@ -337,24 +377,38 @@ def adjusted_ev(row: CombinedMatch, adjustment: ContextAdjustment) -> dict[str, 
     }
 
 
+def _position_gap_text(home: Optional[FPLTeamContext], away: Optional[FPLTeamContext]) -> str:
+    position, gap = biggest_position_gap(home, away)
+    if not position or abs(gap) < 0.15:
+        return "No large position-group availability difference."
+    label = {"GKP": "goalkeeper", "DEF": "defence", "MID": "midfield", "FWD": "attack"}.get(position, position)
+    if gap > 0:
+        return f"The biggest availability difference is in {label}, favouring the home side."
+    return f"The biggest availability difference is in {label}, favouring the away side."
+
+
 def fpl_context_summary(row: CombinedMatch, contexts: dict[str, FPLTeamContext]) -> str:
     def describe(ctx: Optional[FPLTeamContext]) -> str:
         if ctx is None:
             return "FPL data unavailable"
         top = []
-        for p in ctx.unavailable[:5]:
+        for p in ctx.unavailable[:4]:
             chance = int(round(p.chance * 100))
             detail = f"{p.name} ({p.position}, {chance}% chance)"
             if p.news:
                 detail += f" — {p.news}"
             top.append(detail)
-        player_text = "; ".join(top) if top else "no flagged availability issues"
+        player_text = "; ".join(top) if top else "no current flagged availability issues"
         return (
-            f"availability penalty {ctx.availability_penalty:.2f}; "
-            f"unavailable {ctx.unavailable_players}; doubtful {ctx.doubtful_players}; {player_text}"
+            f"current availability penalty {ctx.availability_penalty:.2f}; "
+            f"unavailable {ctx.unavailable_players}; doubtful {ctx.doubtful_players}; "
+            f"ignored stale transfer/loan records {ctx.ignored_departures}; {player_text}"
         )
 
+    home = contexts.get(row.home_team)
+    away = contexts.get(row.away_team)
     return (
-        f"{row.home_team}: {describe(contexts.get(row.home_team))}\n\n"
-        f"{row.away_team}: {describe(contexts.get(row.away_team))}"
+        f"{row.home_team}: {describe(home)}\n\n"
+        f"{row.away_team}: {describe(away)}\n\n"
+        f"{_position_gap_text(home, away)}"
     )
