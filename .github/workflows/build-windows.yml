@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - feature/v2.0-ux-price-shop
+      - feature/v2.1-calibrated-edge
   workflow_dispatch:
 
 permissions:
@@ -52,7 +52,7 @@ jobs:
             --collect-all keyring `
             --collect-all tzdata `
             --hidden-import keyring.backends.Windows `
-            app/launcher_v20.py
+            app/launcher_v21.py
 
       - name: Install Inno Setup
         shell: pwsh
