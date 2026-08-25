@@ -89,8 +89,37 @@ def download_installer(release: ReleaseInfo, progress=None) -> Path:
     return target
 
 
+def external_installer_environment(source: Optional[dict[str, str]] = None) -> dict[str, str]:
+    """Return a clean environment for launching the external Inno installer.
+
+    PyInstaller one-file applications use private ``_PYI_*`` environment
+    variables to coordinate their parent/main/worker processes. Passing those
+    variables through an unrelated installer can make the newly installed
+    one-file application believe it is a worker child of that installer. Newer
+    PyInstaller bootloaders validate the parent executable and intentionally
+    reject that situation with:
+
+        Security validation failure: parent process has different executable!
+
+    The installer is an external process, so it must not inherit the current
+    app's private bootloader state. ``PYINSTALLER_RESET_ENVIRONMENT=1`` is also
+    retained for any newly installed frozen executable that the installer
+    launches after setup, forcing it to start as an independent top-level app.
+    """
+    env = dict(os.environ if source is None else source)
+    for key in list(env):
+        if key.upper().startswith("_PYI_"):
+            env.pop(key, None)
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
 def launch_installer(path: Path) -> None:
     if os.name == "nt":
-        subprocess.Popen([str(path)], close_fds=True)
+        subprocess.Popen(
+            [str(path)],
+            close_fds=True,
+            env=external_installer_environment(),
+        )
     else:
         raise RuntimeError("Automatic installer launch is only supported on Windows.")
