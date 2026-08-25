@@ -95,7 +95,9 @@ Default additional PulseScore sources are:
 - Ladbrokes;
 - TAB;
 - Unibet AU;
-- BetRight.
+- BetRight;
+- Stake (crypto sportsbook);
+- Cloudbet (crypto sportsbook).
 
 Sportsbet is already present in the core data. Polymarket is also included as a fee-adjusted event-market price using the same taker-fee assumption as the Dutch calculator.
 
@@ -126,7 +128,7 @@ The Best prices page shows:
 - EV at the best observed price;
 - EV improvement from price shopping.
 
-If an additional bookmaker is unavailable on the user's PulseScore plan, that source is skipped and the rest of the analysis continues.
+If an additional bookmaker or crypto sportsbook is unavailable on the user's PulseScore plan, that source is skipped and the rest of the analysis continues.
 
 ## Dashboard behaviour
 
