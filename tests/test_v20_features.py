@@ -11,8 +11,14 @@ if APP not in sys.path:
 
 import v14_runtime_hook  # noqa: F401
 import engine
-from main_v20 import V20App
-from price_shop import MatchPriceShop, PriceQuote, _match_league, _top_rows
+import main_v19
+from main_v17 import BLUE_BG, BLUE_DARK
+
+main_v19.BLUE_BG = BLUE_BG
+main_v19.BLUE_DARK = BLUE_DARK
+
+from main_v20 import V20App  # noqa: E402
+from price_shop import MatchPriceShop, PriceQuote, _match_league, _top_rows  # noqa: E402
 
 
 class PriceShopTests(unittest.TestCase):
