@@ -5,6 +5,7 @@ from datetime import datetime
 import edge_model
 import engine
 from self_test_v22 import run as run_v22
+from updater import external_installer_environment
 
 
 def run() -> int:
@@ -32,4 +33,19 @@ def run() -> int:
         return 6
     if outcomes["HOME"].source_count < 2:
         return 7
+
+    # Regression test for the one-file updater handoff. The external installer
+    # must never inherit private PyInstaller parent/worker state, and any frozen
+    # app started by the installer must be told to initialise independently.
+    env = external_installer_environment(
+        {
+            "PATH": r"C:\Windows\System32",
+            "_PYI_PARENT_PROCESS_LEVEL": "1",
+            "_PYI_APPLICATION_HOME_DIR": r"C:\Temp\_MEI12345",
+        }
+    )
+    if any(key.upper().startswith("_PYI_") for key in env):
+        return 8
+    if env.get("PYINSTALLER_RESET_ENVIRONMENT") != "1":
+        return 9
     return 0

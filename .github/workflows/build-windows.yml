@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/v2.3-reference-coverage
+      - hotfix/v2.3.1-updater-env
   workflow_dispatch:
 
 permissions:
