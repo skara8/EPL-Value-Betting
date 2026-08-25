@@ -53,6 +53,36 @@ class PriceShopTests(unittest.TestCase):
         self.assertEqual(shop.best["HOME"].source, "TAB")
         self.assertAlmostEqual(shop.best["HOME"].decimal_odds, 2.20)
 
+    def test_empty_model_price_shop_is_informational_not_primary_failure(self):
+        self.assertTrue(
+            V20FinalApp._is_optional_market_warning(
+                "No model-priced matches were available for price shopping."
+            )
+        )
+        self.assertFalse(V20FinalApp._is_optional_market_warning("Sportsbet: authentication failed"))
+
+    def test_market_coverage_summary_counts_reference_and_model_rows(self):
+        def row(name, pm=False, pin=False, model=False):
+            item = engine.CombinedMatch(
+                kickoff=datetime(2026, 8, 25, 20, 0, tzinfo=engine.BRISBANE),
+                home_team=name,
+                away_team="Opponent",
+            )
+            if pm:
+                item.pm_home = 2.0
+            if pin:
+                item.pin_home = 2.0
+            if model:
+                item.edge_outcomes = {"HOME": SimpleNamespace(model_ev_pct=1.5)}
+            return item
+
+        rows = [
+            row("A", pm=True, pin=True, model=True),
+            row("B", pm=True),
+            row("C", pin=True),
+        ]
+        self.assertEqual(V20FinalApp._market_coverage_summary(rows), (3, 2, 2, 1))
+
 
 class V20CopyTests(unittest.TestCase):
     def test_old_version_language_is_removed(self):

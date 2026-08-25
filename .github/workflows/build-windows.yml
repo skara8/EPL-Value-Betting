@@ -6,6 +6,7 @@ on:
       - main
       - feature/v2.2-cpu-research-models
       - hotfix/v2.2.1-blue-import
+      - hotfix/v2.2.2-price-shop-info
   workflow_dispatch:
 
 permissions:
