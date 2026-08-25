@@ -1,8 +1,11 @@
 import os
 import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 APP = os.path.join(ROOT, "app")
@@ -21,11 +24,13 @@ main_v19.BLUE_DARK = BLUE_DARK
 from main_v22 import V22App  # noqa: E402
 from research_models_v22 import (  # noqa: E402
     HistoricalMatch,
+    ResearchMatchFeatures,
     build_research_features,
     elo_ratings_before,
     lineup_continuity,
     time_decayed_poisson_before,
 )
+from v22_research_storage import research_summary, save_research_features  # noqa: E402
 
 
 class CpuAccelerationTests(unittest.TestCase):
@@ -140,6 +145,45 @@ class HistoricalResearchModelTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertIn(row.match_name, features)
         self.assertIsNotNone(features[row.match_name].elo_home)
+
+
+class ResearchStorageTests(unittest.TestCase):
+    def test_research_snapshot_schema_and_upsert(self):
+        row = engine.CombinedMatch(
+            kickoff=datetime(2026, 8, 29, 20, 0, tzinfo=engine.BRISBANE),
+            home_team="Arsenal",
+            away_team="Chelsea",
+        )
+        row.league = "Premier League"
+        feature = ResearchMatchFeatures(
+            match_name=row.match_name,
+            market_home=0.55, market_draw=0.25, market_away=0.20,
+            elo_home_rating=1600.0, elo_away_rating=1500.0,
+            elo_home=0.58, elo_draw=0.25, elo_away=0.17,
+            poisson_home=0.57, poisson_draw=0.24, poisson_away=0.19,
+            poisson_lambda_home=1.85, poisson_lambda_away=0.90,
+            lineup_home=0.90, lineup_away=0.78, lineup_diff_pp=12.0,
+            home_recent_net_xg=0.75, away_recent_net_xg=-0.10,
+            home_recent_opponent_elo=1540.0, away_recent_opponent_elo=1490.0,
+            market_research_disagreement_pp=3.0,
+            consensus="3/3 agree · Home",
+            history_matches=80,
+            data_quality="HIGH",
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            db = Path(folder) / "research.db"
+            with patch("v22_research_storage.DB_FILE", db):
+                changed = save_research_features([row], {row.match_name: feature})
+                self.assertEqual(changed, 1)
+                summary = research_summary()
+                self.assertEqual(summary.snapshots, 1)
+                self.assertEqual(summary.high_quality, 1)
+                self.assertEqual(summary.with_elo, 1)
+                self.assertEqual(summary.with_poisson, 1)
+                self.assertEqual(summary.with_lineup, 1)
+                # Same event should update rather than create a duplicate.
+                save_research_features([row], {row.match_name: feature})
+                self.assertEqual(research_summary().snapshots, 1)
 
 
 class V22GuiSmokeTests(unittest.TestCase):
