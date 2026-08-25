@@ -18,6 +18,7 @@ main_v19.BLUE_BG = BLUE_BG
 main_v19.BLUE_DARK = BLUE_DARK
 
 from main_v20 import V20App  # noqa: E402
+from main_v20_final import V20FinalApp  # noqa: E402
 from price_shop import MatchPriceShop, PriceQuote, _match_league, _top_rows  # noqa: E402
 
 
@@ -69,6 +70,24 @@ class V20CopyTests(unittest.TestCase):
         self.assertEqual(V20App._side_from_selection(row, "Home"), "HOME")
         self.assertEqual(V20App._side_from_selection(row, "Draw"), "DRAW")
         self.assertEqual(V20App._side_from_selection(row, "Away"), "AWAY")
+
+
+class V20GuiSmokeTests(unittest.TestCase):
+    def test_condensed_navigation_constructs(self):
+        try:
+            app = V20FinalApp()
+        except Exception as exc:
+            self.fail(f"V2 GUI failed to initialise: {exc}")
+        try:
+            self.assertEqual(len(app.notebook.tabs()), 6)
+            self.assertEqual(len(app.markets_book.tabs()), 3)
+            self.assertEqual(len(app.analysis_book.tabs()), 4)
+            self.assertEqual(len(app.tools_book.tabs()), 1)
+            self.assertEqual(len(app.research_book.tabs()), 3)
+            self.assertTrue(hasattr(app, "analysis_progress"))
+            self.assertTrue(hasattr(app, "price_shop_tree"))
+        finally:
+            app.destroy()
 
 
 if __name__ == "__main__":
