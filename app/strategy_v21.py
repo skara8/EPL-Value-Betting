@@ -37,13 +37,26 @@ def selection_name(row: CombinedMatch, side: str) -> str:
 
 
 def _best_quote(row: CombinedMatch, side: str) -> tuple[str, Optional[float]]:
+    """Return the best non-reference execution price for a V2.1 signal.
+
+    Polymarket helps form the external fair probability, so using the same
+    Polymarket quote as the target price would partly let a market assess its own
+    value. The general Best Prices/Dutch tools may still show Polymarket, but the
+    primary V2.1 signal price is selected from Sportsbet/other fixed-odds books.
+    """
     shop = getattr(row, "price_shop", None)
     if shop is not None:
         try:
-            quote = shop.best.get(side)
+            quotes = list(shop.quotes.get(side, ()))
         except Exception:
-            quote = None
-        if quote is not None and getattr(quote, "decimal_odds", None):
+            quotes = []
+        eligible = [
+            q for q in quotes
+            if getattr(q, "decimal_odds", None)
+            and str(getattr(q, "source", "")).strip().lower() != "polymarket"
+        ]
+        if eligible:
+            quote = max(eligible, key=lambda q: float(q.decimal_odds))
             return str(getattr(quote, "source", "Best observed")), float(quote.decimal_odds)
 
     odds = {
@@ -106,10 +119,10 @@ def decision_for_side(
         )
     elif model_ev > 0:
         status = "POSITIVE — BELOW THRESHOLD"
-        reason = f"The best observed price is positive by the point estimate, but it does not clear the configured EV threshold."
+        reason = "The best observed non-reference price is positive by the point estimate, but it does not clear the configured EV threshold."
     else:
         status = "NEGATIVE EV"
-        reason = "This is shown only for comparison; the best observed price is still negative under the model."
+        reason = "This is shown only for comparison; the best observed non-reference price is still negative under the model."
 
     return V21Decision(
         match_name=row.match_name,
