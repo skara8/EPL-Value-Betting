@@ -1,0 +1,74 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches:
+      - main
+      - setup/windows-app
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed `
+            --name EPLValueBetting `
+            --add-data "VERSION;." `
+            --collect-all tkcalendar `
+            app/main.py
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: EPL-Value-Betting-v${{ steps.version.outputs.version }}-Windows-Setup
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload portable executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: EPL-Value-Betting-v${{ steps.version.outputs.version }}-Portable
+          path: dist/EPLValueBetting.exe
+          if-no-files-found: error
+          retention-days: 30
