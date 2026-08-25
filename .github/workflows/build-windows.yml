@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - main
-      - setup/windows-app
+      - feature/v1.3-full-app
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-windows:
@@ -30,6 +30,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run automated tests
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+
       - name: Read version
         id: version
         shell: pwsh
@@ -45,6 +49,9 @@ jobs:
             --name EPLValueBetting `
             --add-data "VERSION;." `
             --collect-all tkcalendar `
+            --collect-all keyring `
+            --collect-all tzdata `
+            --hidden-import keyring.backends.Windows `
             app/main.py
 
       - name: Install Inno Setup
@@ -56,12 +63,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss
+          Copy-Item dist\EPLValueBetting.exe "release\EPL-Value-Betting-v$env:APP_VERSION-Portable.exe"
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: EPL-Value-Betting-v${{ steps.version.outputs.version }}-Windows-Setup
-          path: release/*.exe
+          path: release/*Setup.exe
           if-no-files-found: error
           retention-days: 30
 
@@ -69,6 +77,23 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: EPL-Value-Betting-v${{ steps.version.outputs.version }}-Portable
-          path: dist/EPLValueBetting.exe
+          path: release/*Portable.exe
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish or refresh GitHub Release
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "v$env:APP_VERSION"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag release\*.exe --repo $env:GITHUB_REPOSITORY --clobber
+          } else {
+            gh release create $tag release\*.exe `
+              --repo $env:GITHUB_REPOSITORY `
+              --title "EPL Value Betting v$env:APP_VERSION" `
+              --generate-notes
+          }

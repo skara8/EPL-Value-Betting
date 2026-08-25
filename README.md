@@ -1,62 +1,74 @@
 # EPL Value Betting
 
-Windows desktop application for EPL betting-market analysis and value detection.
+Windows desktop research application for comparing EPL Sportsbet prices with Polymarket market probabilities, screening for value and building a persistent odds-history dataset.
 
-## Current project stage
+## Current version
 
-The repository is being converted from a local Python prototype into an installable Windows application with automated builds and update-ready versioning.
+**V1.3.0**
 
-Current application version: **1.2.0**
+### V1.3 features
 
-## Architecture
+- Native Windows desktop application and installer
+- EPL-only filtering using the official 2026/27 Premier League club membership
+- Sportsbet Australia 90-minute H/D/A odds via the free PulseScore BASIC API
+- Polymarket regulation-time H/D/A market retrieval
+- Removal of Polymarket derivative rows such as halftime, exact score, corners and player props
+- Normalised Polymarket executable YES-ask probabilities
+- Sportsbet expected-value calculation for Home / Draw / Away
+- Configurable minimum EV threshold
+- `VALUE`, `AWAY-FAV VALUE`, `PASS`, `LOW VOLUME` and `NO COMPARISON` screening states
+- Dashboard and dedicated Candidates tab
+- Optional Polymarket-volume quality filter
+- Persistent SQLite research database under the Windows user profile
+- Automatic saving of market snapshots after successful fetches
+- Research-history browser and CSV export
+- PulseScore API-key storage through Windows Credential Manager
+- Local rotating diagnostic logs
+- Built-in update checking and installer download
+- Automatic GitHub Release publishing on successful `main` builds
+- Automated regression tests on every Windows build
 
-- `app/main.py` — Windows application entry point
-- `VERSION` — single source of truth for the application version
-- `requirements.txt` — Python/build dependencies
-- `installer/installer.iss` — Inno Setup Windows installer configuration
-- `.github/workflows/build-windows.yml` — GitHub Actions Windows build pipeline
+## Strategy-preview calculation
 
-## Automatic Windows build
+For each matched EPL fixture, V1.3 converts the Polymarket Home / Draw / Away executable YES asks back to implied probabilities and normalises the three values so they total 100%.
 
-Every push to `main` automatically runs a Windows GitHub Actions job that:
+It then calculates each Sportsbet outcome's comparison EV:
 
-1. checks out the repository;
-2. installs Python 3.12;
-3. installs the dependencies;
-4. builds `EPLValueBetting.exe` with PyInstaller;
-5. builds a normal Windows installer with Inno Setup;
-6. uploads both the installer and portable EXE as downloadable workflow artifacts.
+```text
+EV = (normalised Polymarket probability × Sportsbet decimal odds) - 1
+```
 
-The setup branch also builds automatically so the pipeline can be verified before merging.
+The historical away-favourite finding is currently **a research flag only**. V1.3 does not add an arbitrary probability boost for an away favourite.
 
-## Downloading a development build
+## Data storage
 
-1. Open the repository on GitHub.
-2. Select **Actions**.
-3. Open the latest successful **Build Windows installer** run.
-4. Scroll to **Artifacts**.
-5. Download `EPL-Value-Betting-v1.2.0-Windows-Setup`.
-6. Unzip that GitHub artifact once and run the contained `EPL-Value-Betting-v1.2.0-Setup.exe`.
+User settings, logs and the research database are stored outside `Program Files`, under:
 
-Once formal GitHub Releases are enabled, normal users will download only the installer from the Releases page rather than Actions.
+```text
+%LOCALAPPDATA%\EPLValueBetting\
+```
 
-## Updating the app
+This means installing a newer application version does not overwrite the research database.
 
-The application has the initial GitHub Releases update-checking framework. The intended production workflow is:
+## Windows releases
 
-1. code is updated;
-2. `VERSION` is increased;
-3. GitHub builds the Windows installer;
-4. a GitHub Release is published;
-5. the installed application detects that a newer release exists;
-6. the user downloads and installs the update over the existing version.
+Every successful build produces:
 
-Application research data and settings will be stored outside `Program Files` so upgrades do not erase them.
+- `EPL-Value-Betting-vX.Y.Z-Setup.exe`
+- `EPL-Value-Betting-vX.Y.Z-Portable.exe`
 
-## Security
+When a version is merged into `main`, the workflow automatically creates or refreshes the corresponding GitHub Release. The installed app can check the latest Release, download its installer and start the upgrade.
 
-Never commit API keys, tokens, betting credentials or personal secrets to this repository. Runtime credentials will be stored locally on the user's Windows computer rather than in GitHub.
+## Development workflow
 
-## Planned next step
+1. Develop on a feature branch.
+2. Run automated tests in GitHub Actions.
+3. Build the Windows `.exe` using PyInstaller.
+4. Build the installer using Inno Setup.
+5. Merge the tested pull request into `main`.
+6. GitHub automatically publishes the versioned Release.
+7. Installed applications can detect the new version.
 
-After the Windows installer pipeline is verified, migrate the working EPL V1.2 Sportsbet/Polymarket strategy interface into the installed application, followed by persistent odds-history and closing-line-value storage.
+## Important scope
+
+This project analyses betting-market data. It does not place bets automatically. Strategy flags are research outputs and are not evidence by themselves that an edge is profitable.

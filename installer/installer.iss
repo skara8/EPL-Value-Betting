@@ -7,6 +7,7 @@
 AppId={{8B050A4B-6F31-4A29-8B4E-7A4A60FA11AF}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\EPL Value Betting
 DefaultGroupName=EPL Value Betting
@@ -20,6 +21,9 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayName={#MyAppName}
+CloseApplications=yes
+RestartApplications=no
+SetupLogging=yes
 
 [Files]
 Source: "..\dist\EPLValueBetting.exe"; DestDir: "{app}"; Flags: ignoreversion
