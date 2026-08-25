@@ -38,6 +38,7 @@ class V20FinalApp(V20App):
 
     def _start_progress(self) -> None:
         super()._start_progress()
+        self.dashboard_status_var.set("Analysis running — live progress is shown above")
         self._schedule_progress_drain()
 
     def _schedule_progress_drain(self) -> None:
@@ -74,6 +75,28 @@ class V20FinalApp(V20App):
         self.loading_time_var.set(f"Elapsed {int(elapsed)}s · {eta}")
         self._progress_timer_id = self.after(500, self._update_progress_clock)
 
+    def _apply_v20_result(self, rows, warnings, info_notes, saved, context_saved, edge_saved) -> None:
+        # Extra bookmaker feeds are opportunistic price-shopping sources. A
+        # plan restriction or temporary failure should be visible on the Best
+        # prices page, not interrupt a successful core analysis with a modal
+        # warning dialog.
+        optional_prefixes = (
+            "Bet365:", "Ladbrokes:", "TAB:", "Unibet AU:", "BetRight:",
+            "Stake (crypto):", "Cloudbet (crypto):", "Best-price scan:",
+        )
+        primary_warnings = []
+        optional_notes = []
+        for warning in warnings:
+            if str(warning).startswith(optional_prefixes):
+                optional_notes.append(str(warning))
+            else:
+                primary_warnings.append(warning)
+        if optional_notes:
+            info_notes = list(info_notes) + [
+                f"Optional price sources skipped: {len(optional_notes)}. See Markets → Best prices for the sources that were successfully checked."
+            ]
+        super()._apply_v20_result(rows, primary_warnings, info_notes, saved, context_saved, edge_saved)
+
     def _normalise_visible_copy(self) -> None:
         super()._normalise_visible_copy()
         # Earlier screens also expose explanatory copy through StringVars. A
@@ -88,6 +111,24 @@ class V20FinalApp(V20App):
                         value.set(cleaned)
                 except Exception:
                     pass
+
+        # Notebook tab captions are metadata on the Notebook rather than normal
+        # child-widget text, so sweep every notebook explicitly. This removes
+        # labels such as "V1.5 summary" while retaining the same technical page.
+        def clean_notebooks(widget) -> None:
+            if isinstance(widget, ttk.Notebook):
+                try:
+                    for tab_id in widget.tabs():
+                        current = widget.tab(tab_id, "text")
+                        cleaned = self._clean_copy(str(current))
+                        if cleaned != current:
+                            widget.tab(tab_id, text=cleaned)
+                except Exception:
+                    pass
+            for child in widget.winfo_children():
+                clean_notebooks(child)
+
+        clean_notebooks(self)
 
 
 def main() -> None:
