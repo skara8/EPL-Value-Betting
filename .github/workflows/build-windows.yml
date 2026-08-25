@@ -54,6 +54,12 @@ jobs:
             --hidden-import keyring.backends.Windows `
             app/launcher_v22.py
 
+      - name: Test frozen multicore worker startup
+        shell: pwsh
+        run: |
+          & .\dist\EPLValueBetting.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Frozen multicore self-test failed with exit code $LASTEXITCODE" }
+
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
