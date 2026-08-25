@@ -4,77 +4,113 @@ Windows desktop research application for comparing football prices, estimating f
 
 ## Current version
 
-**V2.1.0**
+**V2.2.0**
 
-## What V2.1 changes
+## What V2.2 changes
 
-V2.1 does **not** add a new pile of subjective football weights. It strengthens the part of the system most likely to contain real edge: sharp-market comparison, price shopping, uncertainty control and validation.
+V2.2 keeps the conservative V2.1 `ROBUST +EV` production rule, but makes the expensive probability calculations use substantially more of a modern multicore CPU and adds several research-only models inspired by the strongest ideas found in public football-prediction repositories.
 
-### 1. Faster Asian Handicap / totals stage
+### 1. Multicore probability calculation
 
-V2.0 could appear to freeze around `Asian handicap & totals` after the all-soccer catalogue became large. The cause was algorithmic: every Sportsbet fixture repeatedly scanned and reparsed the complete Sportsbet and Pinnacle raw-event catalogues.
+The Asian-Handicap/total Poisson calibration is independent for each fixture and is the most CPU-heavy pure-Python part of the market model. A single Python process on a 12-thread PC can therefore appear as only about 8% total CPU usage.
 
-V2.1 parses each raw provider event once, builds date/league lookup indexes, and then matches each fixture against a small candidate bucket. The Dashboard also reports real fixture progress through this stage.
+V2.2 distributes fixture calculations across multiple Windows worker processes:
 
-The probability mathematics are unchanged by this optimisation.
+```text
+logical CPUs detected
+        ↓
+use about 75% of them
+        ↓
+maximum 10 workers
+        ↓
+fit fixtures in parallel
+```
 
-### 2. Robust EV becomes the primary decision number
+Examples:
 
-The existing model already calculated both:
+- 4 logical CPUs -> 3 workers;
+- 8 logical CPUs -> 6 workers;
+- 12 logical CPUs -> 9 workers;
+- 16+ logical CPUs -> capped at 10 workers.
 
-- **Model EV** using the combined external fair probability; and
-- **Conservative EV** using the least-favourable available external provider probability.
+The cap reduces RAM/process-startup overhead in the one-file Windows executable and leaves capacity for Windows and the GUI. Tiny scans remain single-process because multiprocessing overhead would be slower than the calculation itself.
 
-V2.1 promotes the conservative number into the primary Dashboard rule.
+If multiprocessing is blocked by a security product or unusual frozen-Windows environment, V2.2 automatically falls back to the proven serial calculation instead of failing the scan. Diagnostics reports whether the last run used multicore acceleration, the worker count and the stage timings.
 
-A green `ROBUST +EV` signal requires:
+V2.1's indexed AH/totals context matching remains in place, so the old all-catalogue repeated-scan bottleneck is also still removed.
 
-1. at least two external provider components;
-2. medium or high reference-market confidence;
-3. external disagreement no greater than 4 percentage points;
-4. the **least-favourable** external probability still produces EV at or above the configured threshold at the best observed eligible execution price.
+### 2. Historical Elo research model
 
-If the average model says +7% but the less optimistic reference says -1%, V2.1 no longer presents +7% as the main green signal. It becomes a watch/research case.
+V2.2 downloads and caches up to five EPL seasons of public football-data.co.uk results and maintains a pre-match Elo strength estimate.
 
-If nothing passes the robust rule, the Dashboard still shows the highest-EV available outcome, but labels it explicitly as **not a robust signal**.
+The research page shows:
 
-### 3. Football context becomes secondary evidence
+- home and away Elo ratings;
+- an Elo-derived H/D/A probability using the sharp-market draw probability only as the draw anchor;
+- the difference between the Elo view and the sharp-market view.
 
-Expected XI, availability, recent xG-style performance, tactical matchup, manager/squad context and rest remain available in Analysis.
+The Elo number is **not** added to production fair probability yet. Its residual is stored so future validation can ask whether Elo disagreement predicts closing-line movement or improves probability calibration out of sample.
 
-They remain useful research features, but the main V2.1 green signal is market-supported. A football story cannot rescue a price that fails the independent-market robustness test.
+### 3. Time-decayed goals-strength Poisson research model
 
-This is intentional: most public football information is eventually incorporated into sharp prices. The research question is whether football features add incremental information beyond that market baseline.
+Public Dixon-Coles/Poisson implementations reinforced the value of attack strength, defence strength, home advantage and giving recent results more weight than old results.
 
-### 4. Best-price execution remains separate from probability
+V2.2 therefore adds a separate research-only goals model using:
 
-The fair probability is calculated before price shopping.
+- exponentially time-decayed historical results;
+- venue-specific home/away scoring strength;
+- attack and defensive-strength ratios relative to the league;
+- shrinkage toward league averages to reduce small-sample extremes;
+- Poisson H/D/A probabilities and implied expected goals.
 
-V2.1 can compare the same outcome across observed prices from Sportsbet, Polymarket and supported additional PulseScore feeds such as Bet365, Ladbrokes, TAB, Unibet AU, BetRight, Stake and Cloudbet.
+This is deliberately labelled a **time-decayed goals-strength Poisson model**, not a fully fitted Dixon-Coles MLE implementation.
 
-Changing from $1.90 to $2.02 can increase EV because the payout improved. It does not change the estimated chance of the team winning.
+### 4. Expected-XI continuity
 
-Polymarket remains visible in Best Prices and the Dutch tools, but it is **not used as the execution price for the primary V2.1 robust signal** because Polymarket also contributes to the fair-probability model. This avoids using the same market partly as both the probability reference and the price being tested.
+The existing player layer already estimates expected starters. V2.2 now also measures how much the expected XI resembles the recent regular XI, weighted by player strength and expected availability.
 
-### 5. Sharp closing-line validation
+This turns the GitHub research idea of lineup continuity into a storable feature rather than another subjective manual slider.
 
-V2.1 stores the actual non-reference price source and odds that created each decision signal.
+### 5. Recent xG + opponent-strength context
 
-For robust signals it can compare that first observed execution price with the last captured pre-kickoff Pinnacle price on the same outcome. A Pinnacle quote only counts in the headline V2.1 sharp-CLV statistics when it was captured within **six hours of kickoff**; an older snapshot is not presented as a closing price.
+For the available EPL football-intelligence data, V2.2 records each side's recent net xG and the average Elo strength of the opponents in those recent matches.
 
-The new Research validation panel reports:
+Opponent strength is kept visible as a separate feature rather than hidden inside an arbitrary probability bonus. This is intentional: any opponent-adjusted xG transformation should first prove incremental value out of sample.
 
-- robust signals;
-- signals with a captured near-close sharp price;
-- average sharp CLV;
-- percentage with positive sharp CLV;
-- average robust EV when first flagged.
+### 6. Research-model agreement
 
-Positive sharp CLV is the most useful early test of whether the application is repeatedly identifying prices that the sharper market later agrees were too large. ROI remains much noisier over small samples.
+The new **Research -> Research models** page compares:
 
-## Current probability architecture
+```text
+sharp market
+Elo
+ time-decayed Poisson
+expected-XI continuity
+recent xG context
+```
 
-Sportsbet is a target/execution price, not the independent probability source used to assess itself.
+It reports model spread and whether the sharp market, Elo and Poisson models agree on the most likely outcome.
+
+Research agreement can appear beside the Dashboard confidence label, but it does **not** change the displayed EV or turn an amber/watch case into a green recommendation.
+
+### 7. Feature snapshots for future ablation and validation
+
+V2.2 stores the new research features in SQLite alongside the existing market and robust-signal history.
+
+This is the foundation for the next important step from the GitHub research: **feature ablation**. Once enough settled examples and near-closing Pinnacle prices exist, each feature can be tested separately:
+
+- market baseline only;
+- + Elo residual;
+- + time-decayed Poisson residual;
+- + lineup continuity;
+- + xG/opponent context;
+- combinations of the above.
+
+A feature should only enter the production probability model if it improves time-ordered out-of-sample CLV, log loss, Brier score or calibration rather than merely making historical EV look larger.
+
+## Production probability architecture
+
+Sportsbet remains a target/execution price, not the independent probability source used to assess itself.
 
 The external fair layer can use:
 
@@ -82,7 +118,7 @@ The external fair layer can use:
 - Pinnacle/PS3838 power-de-vigged 1X2;
 - Pinnacle Asian Handicap + totals converted into an implied Poisson score distribution.
 
-Pinnacle's 1X2 and AH/totals estimates are combined into one Pinnacle provider component so one provider does not receive multiple full votes.
+Pinnacle 1X2 and AH/totals estimates are combined into one Pinnacle provider component so one provider does not receive multiple full votes.
 
 For decimal price `O` and fair probability `p`:
 
@@ -90,24 +126,55 @@ For decimal price `O` and fair probability `p`:
 EV = p * O - 1
 ```
 
-V2.1 additionally asks whether the same price remains attractive using the least-favourable external provider probability.
+A primary green `ROBUST +EV` signal still requires:
 
-## Why this direction
+1. at least two external provider components;
+2. medium or high reference-market confidence;
+3. external disagreement no greater than 4 percentage points;
+4. the least-favourable external probability still producing EV at or above the configured threshold at the best eligible execution price.
 
-A review of public football-prediction repositories reinforced several useful lessons:
+The new V2.2 football research models do not bypass those rules.
 
-- time-ordered out-of-sample evaluation matters more than in-sample accuracy;
-- log loss, Brier score and calibration matter more than simply predicting the winner;
-- bootstrap/ensemble uncertainty is useful for identifying unstable probabilities;
-- feature selection and ablation are necessary because adding more football variables can make out-of-sample performance worse;
-- xG, Elo, lineup continuity, fatigue, Dixon-Coles/time-decayed team strength and tactical features are promising **research candidates**, but should only enter the production probability correction after demonstrating incremental value;
-- all rolling football features must use only information available before kickoff.
+## Best-price execution
 
-See `docs/V2_1_STRATEGY.md` for the detailed V2.1 research plan and the public repositories reviewed.
+The fair probability is calculated before price shopping. Supported observed execution sources can include Sportsbet, Bet365, Ladbrokes, TAB, Unibet AU, BetRight, Stake and Cloudbet when available through the user's PulseScore plan.
+
+Polymarket remains visible in Best Prices and Dutch tools but is not used as the primary robust execution price when it is also contributing to the fair-probability reference.
+
+## Validation
+
+The Research section retains:
+
+- first-observed robust signals;
+- actual execution source and price;
+- last captured near-kickoff Pinnacle price;
+- sharp CLV;
+- realised result/ROI;
+- Brier/calibration research;
+- V2.2 feature snapshots for later ablation.
+
+Near-close Pinnacle statistics only use observations captured within six hours of kickoff.
+
+## Why these additions
+
+The public-model review produced a consistent lesson rather than a magic formula.
+
+`mejding/matchlabs` includes xG, fatigue, Elo, lineup stability, opponent-adjusted xG, bootstrap uncertainty and strict time-based probabilistic evaluation. Its own reported comparisons also show that adding Elo/shot-volume or injury variants can worsen out-of-sample log loss/Brier score relative to simpler variants.
+
+`kochlisGit/ProphitBet-Soccer-Bets-Predictor` emphasises sliding/cross-validation, holdout evaluation, variance/correlation analysis and feature-selection tools rather than assuming every available variable is useful.
+
+Public Dixon-Coles implementations reinforce time-decayed goal-strength modelling, but do not establish a transferable betting edge by themselves.
+
+V2.2 therefore implements the useful candidate features **as testable residuals**, while keeping the market-supported robust rule in control.
+
+See:
+
+- `docs/V2_1_STRATEGY.md`
+- `docs/V2_2_RESEARCH_MODELS.md`
 
 ## Navigation
 
-Top-level navigation remains deliberately compact:
+Top-level navigation remains compact:
 
 ```text
 Dashboard
@@ -118,11 +185,18 @@ Research
 Settings
 ```
 
-Detailed market, AH, context, football, Dutch, history and diagnostic views remain underneath.
+Research now contains:
+
+```text
+Validation
+History
+Diagnostics
+Research models
+```
 
 ## Data and settings
 
-Settings, logs, cached public football data and SQLite research data live under:
+Settings, logs, cached public football data, historical football-data CSVs and SQLite research data live under:
 
 ```text
 %LOCALAPPDATA%\EPLValueBetting\
@@ -132,4 +206,4 @@ Existing research data is retained across upgrades.
 
 ## Scope
 
-This is a theoretical market-efficiency and probability-modelling project. It does not automatically place bets. A displayed positive EV is an estimate, not proof of profitability; V2.1 is specifically designed to make that estimate harder to pass and easier to validate against the sharp closing market.
+This is a theoretical market-efficiency and probability-modelling project. It does not automatically place bets. A displayed positive EV is an estimate, not proof of profitability. The objective is to make candidate edges difficult to pass and increasingly easy to falsify through sharp closing-line and out-of-sample validation.

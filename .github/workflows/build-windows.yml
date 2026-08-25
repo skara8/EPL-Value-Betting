@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - feature/v2.1-calibrated-edge
+      - feature/v2.2-cpu-research-models
   workflow_dispatch:
 
 permissions:
@@ -52,7 +52,13 @@ jobs:
             --collect-all keyring `
             --collect-all tzdata `
             --hidden-import keyring.backends.Windows `
-            app/launcher_v21.py
+            app/launcher_v22.py
+
+      - name: Test frozen multicore worker startup
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath ".\dist\EPLValueBetting.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Frozen multicore self-test failed with exit code $($process.ExitCode)" }
 
       - name: Install Inno Setup
         shell: pwsh
