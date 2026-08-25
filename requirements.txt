@@ -1,3 +1,4 @@
 requests>=2.31.0
 tkcalendar>=1.6.1
+keyring>=25.0.0
 pyinstaller>=6.10.0
