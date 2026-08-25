@@ -75,27 +75,67 @@ class V20FinalApp(V20App):
         self.loading_time_var.set(f"Elapsed {int(elapsed)}s · {eta}")
         self._progress_timer_id = self.after(500, self._update_progress_clock)
 
+    @staticmethod
+    def _is_optional_market_warning(warning) -> bool:
+        text = str(warning)
+        optional_prefixes = (
+            "Bet365:",
+            "Ladbrokes:",
+            "TAB:",
+            "Unibet AU:",
+            "BetRight:",
+            "Stake (crypto):",
+            "Cloudbet (crypto):",
+            "Best-price scan:",
+            "No model-priced matches were available for price shopping.",
+        )
+        return text.startswith(optional_prefixes)
+
+    @staticmethod
+    def _market_coverage_summary(rows) -> tuple[int, int, int, int]:
+        sportsbet = len(rows)
+        polymarket = sum(1 for row in rows if getattr(row, "pm_home", None) is not None)
+        pinnacle = sum(1 for row in rows if getattr(row, "pin_home", None) is not None)
+        model_priced = 0
+        for row in rows:
+            outcomes = getattr(row, "edge_outcomes", {}) or {}
+            if any(getattr(edge, "model_ev_pct", None) is not None for edge in outcomes.values()):
+                model_priced += 1
+        return sportsbet, polymarket, pinnacle, model_priced
+
     def _apply_v20_result(self, rows, warnings, info_notes, saved, context_saved, edge_saved) -> None:
         # Extra bookmaker feeds are opportunistic price-shopping sources. A
-        # plan restriction or temporary failure should be visible on the Best
-        # prices page, not interrupt a successful core analysis with a modal
-        # warning dialog.
-        optional_prefixes = (
-            "Bet365:", "Ladbrokes:", "TAB:", "Unibet AU:", "BetRight:",
-            "Stake (crypto):", "Cloudbet (crypto):", "Best-price scan:",
-        )
+        # plan restriction, temporary failure, or simply having no independently
+        # model-priced fixture should be visible in the page status rather than
+        # interrupting a successful core analysis with a modal warning dialog.
         primary_warnings = []
         optional_notes = []
         for warning in warnings:
-            if str(warning).startswith(optional_prefixes):
+            if self._is_optional_market_warning(warning):
                 optional_notes.append(str(warning))
             else:
                 primary_warnings.append(warning)
+
+        coverage_detail = None
+        if self.price_shop_result is not None and not self.price_shop_result.matches:
+            sportsbet, polymarket, pinnacle, model_priced = self._market_coverage_summary(rows)
+            coverage_detail = (
+                f"Price shopping skipped: {sportsbet} Sportsbet fixture(s) were loaded; "
+                f"Polymarket matched {polymarket}; Pinnacle matched {pinnacle}; "
+                f"independently model-priced fixtures {model_priced}."
+            )
+            optional_notes.append(coverage_detail)
+
         if optional_notes:
-            info_notes = list(info_notes) + [
-                f"Optional price sources skipped: {len(optional_notes)}. See Markets → Best prices for the sources that were successfully checked."
-            ]
+            info_notes = list(info_notes) + optional_notes
+
         super()._apply_v20_result(rows, primary_warnings, info_notes, saved, context_saved, edge_saved)
+
+        if coverage_detail and hasattr(self, "price_shop_status_var"):
+            self.price_shop_status_var.set(
+                coverage_detail
+                + " This is not a primary-data failure: the core Sportsbet scan completed, but there was no independent fair probability available for the targeted best-price pass."
+            )
 
     def _normalise_visible_copy(self) -> None:
         super()._normalise_visible_copy()
