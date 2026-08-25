@@ -50,6 +50,7 @@ jobs:
             --add-data "VERSION;." `
             --collect-all tkcalendar `
             --collect-all keyring `
+            --collect-all tzdata `
             --hidden-import keyring.backends.Windows `
             app/main.py
 
