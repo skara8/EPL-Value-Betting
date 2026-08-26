@@ -10,6 +10,7 @@ removed before the originally observed execution quote is evaluated.
 
 import random
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from statistics import mean
@@ -67,6 +68,20 @@ def _connect() -> sqlite3.Connection:
     return con
 
 
+@contextmanager
+def _db():
+    con = _connect()
+    try:
+        yield con
+    except Exception:
+        con.rollback()
+        raise
+    else:
+        con.commit()
+    finally:
+        con.close()
+
+
 def _dt(value: str) -> Optional[datetime]:
     try:
         text = str(value)
@@ -104,8 +119,6 @@ def _close_probability(con: sqlite3.Connection, event_key: str, kickoff: str, si
             continue
         minutes = (kickoff_dt - captured).total_seconds() / 60.0
         if minutes < 0 or minutes > MAX_NEAR_CLOSE_MINUTES:
-            # Rows are reverse chronological. Once we're beyond the window,
-            # older rows will also be too early.
             if minutes > MAX_NEAR_CLOSE_MINUTES:
                 break
             continue
@@ -121,9 +134,7 @@ def refresh_v3_clv_evaluations() -> int:
     """Evaluate first threshold-clearing V3 observations once a sharp near-close exists."""
     changed = 0
     evaluated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    with _connect() as con:
-        # First point-in-time threshold-clearing research observation for each
-        # event/side. Using MIN(id) prevents later prices from rewriting history.
+    with _db() as con:
         try:
             decisions = con.execute(
                 """SELECT d.* FROM v3_decision_snapshots d
@@ -146,8 +157,6 @@ def refresh_v3_clv_evaluations() -> int:
             quote_odds = float(decision["quote_odds"])
             model_p = float(decision["model_probability"])
             close_fair_odds = 1.0 / close_p
-            # Positive means the original execution price was better than the
-            # later de-vigged sharp fair price for the same outcome.
             price_clv = (quote_odds * close_p - 1.0) * 100.0
             model_gap = (model_p - close_p) * 100.0
             con.execute(
@@ -166,7 +175,6 @@ def refresh_v3_clv_evaluations() -> int:
                 ),
             )
             changed += 1
-        con.commit()
     return changed
 
 
@@ -185,7 +193,7 @@ def _bootstrap_mean_ci(values: list[float], samples: int = 1000) -> tuple[float,
 
 
 def v3_clv_summary() -> V3CLVSummary:
-    with _connect() as con:
+    with _db() as con:
         rows = con.execute("SELECT * FROM v3_clv_evaluations ORDER BY id").fetchall()
     if not rows:
         return V3CLVSummary()
@@ -195,9 +203,6 @@ def v3_clv_summary() -> V3CLVSummary:
     low, high = _bootstrap_mean_ci(clv)
     positive = sum(1 for value in clv if value > 0) / len(clv) * 100.0
 
-    # Deliberately demanding and only about execution/price evidence. The app
-    # also requires the separate forecast-quality gate before combining this
-    # into EDGE_VALIDATED.
     if len(clv) >= 200 and low > 0.0 and positive > 52.0:
         grade = "CLV_VALIDATED"
     elif len(clv) >= 50:
