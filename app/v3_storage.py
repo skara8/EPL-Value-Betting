@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 import sqlite3
-from dataclasses import asdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Iterable, Optional
 
@@ -173,6 +172,26 @@ def _connect() -> sqlite3.Connection:
     return con
 
 
+@contextmanager
+def _db():
+    """Yield a connection and always close the Windows file handle afterwards.
+
+    sqlite3.Connection's own context manager commits/rolls back but does *not*
+    close the connection. V3 research functions therefore use this wrapper so
+    long-running desktop sessions and tests cannot accumulate locked DB handles.
+    """
+    con = _connect()
+    try:
+        yield con
+    except Exception:
+        con.rollback()
+        raise
+    else:
+        con.commit()
+    finally:
+        con.close()
+
+
 def _utc_iso(dt) -> str:
     return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
 
@@ -238,7 +257,7 @@ def save_v3_live_snapshot(rows: Iterable[CombinedMatch], decisions: Iterable[V3D
             decision.market_probability, decision.market_gap_pp, decision.challenger_probability, decision.challenger_gap_pp,
         ))
 
-    with _connect() as con:
+    with _db() as con:
         if model_values:
             con.executemany(
                 """INSERT INTO v3_model_snapshots (
@@ -272,13 +291,12 @@ def save_v3_live_snapshot(rows: Iterable[CombinedMatch], decisions: Iterable[V3D
                 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 decision_values,
             )
-        con.commit()
     return len(model_values), len(quote_values), len(decision_values)
 
 
 def save_walkforward_result(result: WalkForwardResult) -> int:
     created = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    with _connect() as con:
+    with _db() as con:
         cur = con.execute(
             """INSERT INTO v3_walkforward_runs (
                 created_at,model_version,feature_schema,league_keys,predictions,periods,
@@ -308,25 +326,22 @@ def save_walkforward_result(result: WalkForwardResult) -> int:
                     ) for r in result.records
                 ],
             )
-        con.commit()
     return run_id
 
 
 def latest_walkforward_summary() -> Optional[dict]:
-    with _connect() as con:
+    with _db() as con:
         con.row_factory = sqlite3.Row
         row = con.execute("SELECT * FROM v3_walkforward_runs ORDER BY id DESC LIMIT 1").fetchone()
         return dict(row) if row else None
 
 
 def current_validation_grade() -> str:
-    """Return the V3 betting-validation grade.
+    """Return the forecast-only V3 grade retained for compatibility.
 
-    A walk-forward football forecast can earn FORECAST_VALIDATED, but that is
-    not enough to call a betting edge validated. EDGE_VALIDATED is deliberately
-    reserved for a later point-in-time CLV/execution gate. Therefore the current
-    strategy remains research-labelled unless that stronger grade is explicitly
-    present in future validation data.
+    The release UI/strategy uses v3_validation_gate.current_validation_grade,
+    which additionally requires the separate sharp near-close CLV gate before
+    any edge can be labelled EDGE_VALIDATED.
     """
     summary = latest_walkforward_summary()
     if not summary:
@@ -336,7 +351,7 @@ def current_validation_grade() -> str:
 
 
 def v3_counts() -> tuple[int, int, int, int]:
-    with _connect() as con:
+    with _db() as con:
         models = int(con.execute("SELECT COUNT(*) FROM v3_model_snapshots").fetchone()[0])
         quotes = int(con.execute("SELECT COUNT(*) FROM v3_quote_snapshots").fetchone()[0])
         decisions = int(con.execute("SELECT COUNT(*) FROM v3_decision_snapshots").fetchone()[0])
