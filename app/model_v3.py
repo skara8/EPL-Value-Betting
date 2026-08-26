@@ -151,21 +151,21 @@ def _regress_season(state: DynamicLeagueState, season: str) -> None:
     state.season = season
 
 
-def _decay(team: DynamicTeamState, at: datetime, rate: float) -> None:
+def _decay_factor(team: DynamicTeamState, at: datetime, rate: float) -> float:
     if team.last_seen is None:
-        return
+        return 1.0
     days = max(0.0, (at - team.last_seen).total_seconds() / 86400.0)
-    f = math.exp(-rate * min(days, 730.0))
-    team.attack *= f
-    team.defence *= f
+    return math.exp(-rate * min(days, 730.0))
 
 
 def score_intensities(state: DynamicLeagueState, home: str, away: str, at: datetime) -> tuple[float, float]:
+    # Forecasting is side-effect free: later current fixtures cannot change
+    # simply because an earlier row happened to be iterated first.
     hs, as_ = _team(state, home), _team(state, away)
-    _decay(hs, at, state.params.process_decay_per_day)
-    _decay(as_, at, state.params.process_decay_per_day)
-    lh = math.exp(state.log_home_base + hs.attack - as_.defence)
-    la = math.exp(state.log_away_base + as_.attack - hs.defence)
+    hf = _decay_factor(hs, at, state.params.process_decay_per_day)
+    af = _decay_factor(as_, at, state.params.process_decay_per_day)
+    lh = math.exp(state.log_home_base + hs.attack * hf - as_.defence * af)
+    la = math.exp(state.log_away_base + as_.attack * af - hs.defence * hf)
     return max(0.15, min(4.75, lh)), max(0.12, min(4.25, la))
 
 
@@ -193,6 +193,13 @@ def update_dynamic_state(state: DynamicLeagueState, match: HistoricalMatch) -> N
     _regress_season(state, match.season)
     home, away = match.home_team, match.away_team
     hs, as_ = _team(state, home), _team(state, away)
+    # Apply state decay once when an observed match arrives. Forecast calls only
+    # read a decayed view and never mutate the stored state.
+    hf = _decay_factor(hs, match.kickoff, state.params.process_decay_per_day)
+    af = _decay_factor(as_, match.kickoff, state.params.process_decay_per_day)
+    hs.attack *= hf; hs.defence *= hf
+    as_.attack *= af; as_.defence *= af
+    hs.last_seen = match.kickoff; as_.last_seen = match.kickoff
     lh, la = score_intensities(state, home, away, match.kickoff)
     eh, ea = match.home_goals - lh, match.away_goals - la
     lr = state.params.learning_rate / math.sqrt(1.0 + min(hs.matches, as_.matches) / 45.0)
@@ -346,14 +353,22 @@ def build_v3_forecasts(rows: list[CombinedMatch], histories: dict[str, list[Hist
             lh = [m for m in histories[lk] if m.kickoff < cutoff]
             lp,_,_,_ = tune_model(sources[lk],lh)
             lower = fit_state(sources[lk],lh,cutoff,lp)
+
+        # Apply promotion/transfer priors exactly once to each fitted state. This
+        # keeps current forecasts invariant to fixture iteration order.
+        current_teams = {canonical_history_team(name) for row in league_rows for name in (row.home_team,row.away_team)}
+        transfer_flags = {team:_apply_transfer(state,team,lower) for team in current_teams}
+        for bs in bootstrap:
+            for team in current_teams:
+                _apply_transfer(bs,team,lower)
+
         for row in league_rows:
             home, away = canonical_history_team(row.home_team), canonical_history_team(row.away_team)
-            ph, pa = _apply_transfer(state,home,lower), _apply_transfer(state,away,lower)
+            ph, pa = transfer_flags.get(home,False), transfer_flags.get(away,False)
             dynamic, elo, lh, la = component_probabilities(state,home,away,row.kickoff.astimezone(timezone.utc))
             central = combined_probability(dynamic,elo,weight,temp)
             draws=[]
             for bs in bootstrap:
-                _apply_transfer(bs,home,lower); _apply_transfer(bs,away,lower)
                 bd,be,_,_ = component_probabilities(bs,home,away,row.kickoff.astimezone(timezone.utc))
                 draws.append(combined_probability(bd,be,weight,temp))
             draws.append(central)
