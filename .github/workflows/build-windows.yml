@@ -51,7 +51,7 @@ jobs:
             --collect-all keyring `
             --collect-all tzdata `
             --hidden-import keyring.backends.Windows `
-            app/launcher_v3.py
+            app/launcher.py
 
       - name: Test frozen V3 startup, GUI imports, model and walk-forward validation
         shell: pwsh
