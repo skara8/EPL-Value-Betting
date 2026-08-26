@@ -9,13 +9,13 @@ if APP not in sys.path:
 
 import v14_runtime_hook  # noqa: F401
 import main_v20_release  # noqa: F401 - palette compatibility shim
-from main_v3 import V3App  # noqa: E402
+from main_v3_release import V3ReleaseApp  # noqa: E402
 
 
 class V3GuiSmokeTests(unittest.TestCase):
     def test_v3_scientific_pages_construct(self):
         try:
-            app = V3App()
+            app = V3ReleaseApp()
         except Exception as exc:
             self.fail(f"V3 GUI failed to initialise: {exc}")
         try:
