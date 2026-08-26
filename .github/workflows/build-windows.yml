@@ -1,3 +1,4 @@
+# V3 final release gate: calculation tests + GUI construction + frozen startup + installer.
 name: Build Windows installer
 
 on:
