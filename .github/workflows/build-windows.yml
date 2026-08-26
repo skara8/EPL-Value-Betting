@@ -4,8 +4,7 @@ on:
   push:
     branches:
       - main
-      - feature/v2.3-reference-coverage
-      - hotfix/v2.3.1-updater-env
+      - feature/v2.4-independent-multileague
   workflow_dispatch:
 
 permissions:
@@ -53,13 +52,13 @@ jobs:
             --collect-all keyring `
             --collect-all tzdata `
             --hidden-import keyring.backends.Windows `
-            app/launcher_v23.py
+            app/launcher_v24.py
 
-      - name: Test frozen multicore worker startup and GUI imports
+      - name: Test frozen V2.4 multicore startup, GUI imports and independent model
         shell: pwsh
         run: |
           $process = Start-Process -FilePath ".\dist\EPLValueBetting.exe" -ArgumentList "--self-test" -Wait -PassThru
-          if ($process.ExitCode -ne 0) { throw "Frozen V2.3 self-test failed with exit code $($process.ExitCode)" }
+          if ($process.ExitCode -ne 0) { throw "Frozen V2.4 self-test failed with exit code $($process.ExitCode)" }
 
       - name: Install Inno Setup
         shell: pwsh
