@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from statistics import NormalDist
 from typing import Optional
 
 from engine import CombinedMatch
+from execution_v3 import is_executable_quote
 from model_v3 import V3Forecast
 
 SIDES = ("HOME", "DRAW", "AWAY")
@@ -33,6 +35,12 @@ class V3Decision:
     reason: str
     market_probability: Optional[float] = None
     market_gap_pp: Optional[float] = None
+    quote_received_at: Optional[str] = None
+    quote_market_timestamp: Optional[str] = None
+    quote_age_seconds: Optional[float] = None
+    quote_liquidity: Optional[float] = None
+    quote_available_size: Optional[float] = None
+    quote_event_id: Optional[str] = None
 
 
 def selection_name(row: CombinedMatch, side: str) -> str:
@@ -42,9 +50,13 @@ def selection_name(row: CombinedMatch, side: str) -> str:
 def _best_quote(row: CombinedMatch, side: str):
     shop = getattr(row, "price_shop", None)
     if shop is not None:
-        quotes = [q for q in shop.quotes.get(side, ()) if getattr(q, "decimal_odds", None) and float(q.decimal_odds) > 1]
-        if quotes:
-            return max(quotes, key=lambda q: float(q.decimal_odds))
+        quotes = [q for q in shop.quotes.get(side, ()) if is_executable_quote(q)]
+        return max(quotes, key=lambda q: float(q.decimal_odds)) if quotes else None
+
+    # When the all-book scan is disabled, the just-fetched Sportsbet quote can
+    # still be used as a comparison. Once a price-shop object exists, however,
+    # this fallback is deliberately disabled so stale/zero-size quotes cannot
+    # bypass the execution gate.
     odds = {
         "HOME": getattr(row, "sb_home", None),
         "DRAW": getattr(row, "sb_draw", None),
@@ -57,6 +69,12 @@ def _best_quote(row: CombinedMatch, side: str):
         source = "Sportsbet"
         decimal_odds = float(odds)
         match_confidence = 1.0
+        received_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        market_timestamp = getattr(row, "sportsbet_updated", None)
+        age_seconds = None
+        liquidity = None
+        available_size = None
+        event_id = getattr(row, "sportsbet_event_id", None)
 
     return BaseQuote()
 
@@ -109,20 +127,20 @@ def decision_for_side(row: CombinedMatch, side: str, min_ev_pct: float = 4.0) ->
         status = "V3 HIGH-CONFIDENCE CANDIDATE"
         reason = (
             f"The independent V3 model prices {selection_name(row, side)} at {p * 100:.1f}% (fair ${fair:.2f}). "
-            f"{quote.source} offers ${odds:.2f}; central EV is {model_ev:+.1f}%, the block-bootstrap 5th-percentile EV is {lower_ev:+.1f}%, "
+            f"{quote.source} offers an execution-eligible ${odds:.2f}; central EV is {model_ev:+.1f}%, the block-bootstrap 5th-percentile EV is {lower_ev:+.1f}%, "
             f"and the estimated probability EV is positive is {p_positive * 100:.0f}%. This remains a research candidate until OOS/CLV validation clears the betting-edge gate."
         )
     elif model_ev >= min_ev_pct and p_positive >= 0.65:
         status = "V3 +EV CANDIDATE — UNCERTAINTY"
         reason = (
-            f"Central EV is {model_ev:+.1f}% at ${odds:.2f}, but uncertainty is material: 5th-percentile EV {lower_ev:+.1f}% and P(EV>0) about {p_positive * 100:.0f}%."
+            f"Central EV is {model_ev:+.1f}% at an execution-eligible ${odds:.2f}, but uncertainty is material: 5th-percentile EV {lower_ev:+.1f}% and P(EV>0) about {p_positive * 100:.0f}%."
         )
     elif model_ev > 0:
         status = "POSITIVE — BELOW V3 THRESHOLD"
         reason = f"The independent point estimate is positive ({model_ev:+.1f}%) but does not satisfy the current V3 research-selection gate."
     else:
         status = "NEGATIVE EV"
-        reason = f"The best observed price still implies {model_ev:+.1f}% EV under the independent V3 probability."
+        reason = f"The best execution-eligible observed price still implies {model_ev:+.1f}% EV under the independent V3 probability."
 
     return V3Decision(
         match_name=row.match_name,
@@ -146,6 +164,12 @@ def decision_for_side(row: CombinedMatch, side: str, min_ev_pct: float = 4.0) ->
         reason=reason,
         market_probability=market_p,
         market_gap_pp=market_gap,
+        quote_received_at=getattr(quote, "received_at", None),
+        quote_market_timestamp=getattr(quote, "market_timestamp", None),
+        quote_age_seconds=getattr(quote, "age_seconds", None),
+        quote_liquidity=getattr(quote, "liquidity", None),
+        quote_available_size=getattr(quote, "available_size", None),
+        quote_event_id=getattr(quote, "event_id", None),
     )
 
 
