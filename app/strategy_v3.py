@@ -3,8 +3,8 @@ from __future__ import annotations
 """Decision layer for V3.
 
 V3 deliberately stops calling the minimum component probability a confidence
-bound.  A displayed positive EV remains a *research signal* until the
-walk-forward validation gate has enough evidence to certify the model family.
+bound. A displayed positive EV remains a *research signal* until both forecast
+quality and point-in-time market/CLV evidence certify a genuine betting edge.
 """
 
 from dataclasses import dataclass
@@ -110,18 +110,19 @@ def decision_for_side(
     challenger_gap = (challenger - p) * 100.0 if challenger is not None else None
 
     grade = str(validation_grade or "UNVALIDATED").upper()
-    if model_ev >= min_ev_pct and grade == "VALIDATED":
+    if model_ev >= min_ev_pct and grade == "EDGE_VALIDATED":
         status = "VALIDATED +EV"
         reason = (
-            f"The validated independent model estimates {selection_name(row, side)} at {p * 100:.1f}% "
+            f"The independently validated model estimates {selection_name(row, side)} at {p * 100:.1f}% "
             f"(fair ${fair:.2f}); {source} is offering ${odds:.2f}, producing {model_ev:+.1f}% model EV."
         )
     elif model_ev >= min_ev_pct:
         status = "RESEARCH +EV — UNVALIDATED"
+        forecast_note = " Forecast accuracy has passed its research gate, but betting edge has not yet passed the CLV/execution gate." if grade == "FORECAST_VALIDATED" else ""
         reason = (
             f"The independent football baseline estimates {selection_name(row, side)} at {p * 100:.1f}% "
             f"(fair ${fair:.2f}); {source} is offering ${odds:.2f}, which implies {model_ev:+.1f}% EV. "
-            "V3 does not label this a proven edge until chronological validation passes."
+            f"V3 does not label this a proven edge until chronological and point-in-time market validation passes.{forecast_note}"
         )
     elif model_ev > 0:
         status = "POSITIVE — BELOW THRESHOLD"
