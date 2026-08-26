@@ -16,6 +16,8 @@ KICKOFF_TOLERANCE_MINUTES = 90.0
 MIN_TEAM_SCORE = 0.90
 MIN_PAIR_SCORE = 0.93
 AMBIGUITY_MARGIN = 0.035
+MIN_EXECUTION_MATCH_CONFIDENCE = 0.94
+MAX_KNOWN_QUOTE_AGE_SECONDS = 600.0
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,8 @@ class V3PriceQuote:
     line: Optional[float] = None
     event_id: Optional[str] = None
     match_confidence: float = 1.0
+    executable: bool = True
+    execution_reason: str = ""
 
 
 @dataclass
@@ -43,6 +47,7 @@ class V3MatchPriceShop:
     best: dict[str, Optional[V3PriceQuote]] = field(default_factory=lambda: {"HOME": None, "DRAW": None, "AWAY": None})
     model_probability: dict[str, Optional[float]] = field(default_factory=dict)
     best_ev_pct: dict[str, Optional[float]] = field(default_factory=dict)
+    rejected_quotes: dict[str, int] = field(default_factory=lambda: {"HOME": 0, "DRAW": 0, "AWAY": 0})
 
 
 @dataclass
@@ -54,6 +59,7 @@ class V3PriceShopResult:
     notes: list[str]
     eligible_matches: int = 0
     rejected_ambiguous_events: int = 0
+    rejected_non_executable_quotes: int = 0
 
 
 def _emit(progress, percent: int, stage: str, detail: str) -> None:
@@ -167,12 +173,106 @@ def _match_event(events: list[dict[str, Any]], target):
     return event, prices, confidence, False
 
 
+def quote_execution_reason(quote: V3PriceQuote) -> Optional[str]:
+    """Return None only when the observed quote is usable for EV ranking.
+
+    The receive timestamp is the point-in-time evidence. Provider timestamps are
+    used as an additional freshness gate when available. Known zero liquidity or
+    size is binding rather than merely displayed as metadata.
+    """
+    if quote.decimal_odds <= 1.0:
+        return "invalid odds"
+    if not quote.received_at:
+        return "missing receive timestamp"
+    if float(quote.match_confidence or 0.0) < MIN_EXECUTION_MATCH_CONFIDENCE:
+        return "event match confidence below execution gate"
+    if quote.age_seconds is not None and quote.age_seconds > MAX_KNOWN_QUOTE_AGE_SECONDS:
+        return f"provider quote older than {int(MAX_KNOWN_QUOTE_AGE_SECONDS)}s"
+    if quote.available_size is not None and float(quote.available_size) <= 0.0:
+        return "known available size is zero"
+    if quote.liquidity is not None and float(quote.liquidity) <= 0.0:
+        return "known liquidity is zero"
+    return None
+
+
+def is_executable_quote(quote: V3PriceQuote) -> bool:
+    return bool(getattr(quote, "executable", True)) and quote_execution_reason(quote) is None
+
+
+def best_executable_quote(quotes: list[V3PriceQuote]) -> Optional[V3PriceQuote]:
+    valid = [quote for quote in quotes if is_executable_quote(quote)]
+    return max(valid, key=lambda q: float(q.decimal_odds)) if valid else None
+
+
+def _make_quote(
+    source: str,
+    side: str,
+    odds: float,
+    raw_display: str,
+    received: datetime,
+    *,
+    market_timestamp: Optional[str] = None,
+    liquidity: Optional[float] = None,
+    available_size: Optional[float] = None,
+    commission: Optional[float] = None,
+    line: Optional[float] = None,
+    event_id: Optional[str] = None,
+    match_confidence: float = 1.0,
+) -> V3PriceQuote:
+    age = _age_seconds(market_timestamp, received)
+    provisional = V3PriceQuote(
+        source,
+        side,
+        float(odds),
+        raw_display,
+        received.isoformat(timespec="seconds"),
+        market_timestamp,
+        age,
+        liquidity,
+        available_size,
+        commission,
+        line,
+        event_id,
+        match_confidence,
+        True,
+        "",
+    )
+    reason = quote_execution_reason(provisional)
+    if reason is None:
+        return provisional
+    return V3PriceQuote(
+        provisional.source,
+        provisional.side,
+        provisional.decimal_odds,
+        provisional.raw_display,
+        provisional.received_at,
+        provisional.market_timestamp,
+        provisional.age_seconds,
+        provisional.liquidity,
+        provisional.available_size,
+        provisional.commission,
+        provisional.line,
+        provisional.event_id,
+        provisional.match_confidence,
+        False,
+        reason,
+    )
+
+
 def _add_base_quotes(shop: V3MatchPriceShop, row) -> None:
     received = datetime.now(timezone.utc)
-    stamp = received.isoformat(timespec="seconds")
     for side, odds in (("HOME", row.sb_home), ("DRAW", row.sb_draw), ("AWAY", row.sb_away)):
         if odds is not None and odds > 1:
-            shop.quotes[side].append(V3PriceQuote("Sportsbet", side, float(odds), f"{float(odds):.2f}", stamp, getattr(row,"sportsbet_updated",None)))
+            shop.quotes[side].append(_make_quote(
+                "Sportsbet",
+                side,
+                float(odds),
+                f"{float(odds):.2f}",
+                received,
+                market_timestamp=getattr(row, "sportsbet_updated", None),
+                event_id=str(getattr(row, "sportsbet_event_id", "") or "") or None,
+                match_confidence=1.0,
+            ))
     for side, odds in (("HOME", row.pm_home), ("DRAW", row.pm_draw), ("AWAY", row.pm_away)):
         if odds is None or odds <= 1:
             continue
@@ -181,9 +281,17 @@ def _add_base_quotes(shop: V3MatchPriceShop, row) -> None:
             effective = polymarket_effective_decimal_odds(price)
         except ValueError:
             continue
-        shop.quotes[side].append(V3PriceQuote(
-            "Polymarket", side, effective, f"{price*100:.1f}¢", stamp,
-            getattr(row,"polymarket_updated",None), liquidity=getattr(row,"polymarket_liquidity",None), match_confidence=1.0,
+        shop.quotes[side].append(_make_quote(
+            "Polymarket",
+            side,
+            effective,
+            f"{price*100:.1f}¢",
+            received,
+            market_timestamp=getattr(row, "polymarket_updated", None),
+            liquidity=getattr(row, "polymarket_liquidity", None),
+            available_size=getattr(row, "polymarket_available_size", None),
+            event_id=str(getattr(row, "polymarket_event_id", "") or "") or None,
+            match_confidence=1.0,
         ))
 
 
@@ -196,10 +304,10 @@ def fetch_all_best_prices(api_key: str, rows: list, progress=None) -> V3PriceSho
         _add_base_quotes(shop,row)
         matches[row.match_name] = shop
     if not targets:
-        return V3PriceShopResult(matches, [], 0, 0, ["No independently modelled fixtures were available for execution scanning."], 0, 0)
+        return V3PriceShopResult(matches, [], 0, 0, ["No independently modelled fixtures were available for execution scanning."], 0, 0, 0)
 
     leagues = sorted({str(getattr(r,"league","") or "Unknown league") for r in targets})
-    requests = hits = rejected = 0
+    requests = hits = rejected = rejected_quotes = 0
     checked, notes = [], []
     total_steps = max(1, len(BOOKMAKERS)*(1+len(leagues)))
     step = 0
@@ -228,10 +336,20 @@ def fetch_all_best_prices(api_key: str, rows: list, progress=None) -> V3PriceSho
                     liquidity = engine.safe_float(event.get("liquidity") or event.get("marketLiquidity"))
                     available = engine.safe_float(event.get("availableSize") or event.get("maxStake"))
                     for side, odds in zip(SIDES,prices):
-                        matches[row.match_name].quotes[side].append(V3PriceQuote(
-                            name,side,odds,f"{odds:.2f}",received.isoformat(timespec="seconds"),market_stamp,
-                            _age_seconds(market_stamp,received),liquidity,available,event_id=str(event_id) if event_id is not None else None,match_confidence=confidence,
-                        ))
+                        quote = _make_quote(
+                            name,
+                            side,
+                            odds,
+                            f"{odds:.2f}",
+                            received,
+                            market_timestamp=market_stamp,
+                            liquidity=liquidity,
+                            available_size=available,
+                            event_id=str(event_id) if event_id is not None else None,
+                            match_confidence=confidence,
+                        )
+                        matches[row.match_name].quotes[side].append(quote)
+                        rejected_quotes += int(not is_executable_quote(quote))
                 _emit(progress,int(100*step/total_steps),"V3 all-book quote matrix",f"{name}: checked all {len(league_targets)} modelled fixture(s) in {league}")
         except Exception as exc:
             notes.append(f"{name}: {exc}")
@@ -239,7 +357,8 @@ def fetch_all_best_prices(api_key: str, rows: list, progress=None) -> V3PriceSho
     for row in targets:
         shop = matches[row.match_name]
         for side in SIDES:
-            shop.best[side] = max(shop.quotes[side], key=lambda q:q.decimal_odds) if shop.quotes[side] else None
+            shop.best[side] = best_executable_quote(shop.quotes[side])
+            shop.rejected_quotes[side] = sum(1 for quote in shop.quotes[side] if not is_executable_quote(quote))
             p,best = shop.model_probability.get(side),shop.best[side]
             shop.best_ev_pct[side] = (float(p)*best.decimal_odds-1)*100 if p is not None and best else None
         row.price_shop = shop
@@ -248,5 +367,5 @@ def fetch_all_best_prices(api_key: str, rows: list, progress=None) -> V3PriceSho
             setattr(row,f"best_price_{suffix}",best.decimal_odds if best else None)
             setattr(row,f"best_price_{suffix}_source",best.source if best else None)
             setattr(row,f"best_price_ev_{suffix}",shop.best_ev_pct[side])
-    _emit(progress,100,"V3 all-book quote matrix",f"Completed {len(targets)} fixtures across {len(checked)} additional bookmakers")
-    return V3PriceShopResult(matches,checked,requests,hits,notes,len(targets),rejected)
+    _emit(progress,100,"V3 all-book quote matrix",f"Completed {len(targets)} fixtures across {len(checked)} additional bookmakers; rejected {rejected_quotes} non-executable quote(s)")
+    return V3PriceShopResult(matches,checked,requests,hits,notes,len(targets),rejected,rejected_quotes)
