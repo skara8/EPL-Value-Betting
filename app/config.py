@@ -22,7 +22,7 @@ def read_version() -> str:
     try:
         return (resource_root() / "VERSION").read_text(encoding="utf-8").strip()
     except Exception:
-        return "3.0.0"
+        return "3.1.0"
 
 
 VERSION = read_version()
