@@ -61,7 +61,7 @@ class V3StorageTests(unittest.TestCase):
         counts=v3_storage.save_v3_snapshot([row],[decision]); self.assertEqual(counts,(1,1,1)); self.assertEqual(v3_storage.v3_counts()[:3],(1,1,1))
         report=walk_forward_validate(self.source(),self.history(),min_train_matches=110,fold_size=35,max_folds=1); self.assertGreater(report.predictions,0)
         run_id=v3_storage.save_validation_report(report); self.assertGreater(run_id,0); self.assertEqual(v3_storage.v3_counts()[3],1)
-        with v3_storage._connect() as con:
+        with v3_storage._db() as con:
             stored=con.execute("SELECT model_version,feature_schema_version,feature_snapshot_hash FROM v3_forecasts").fetchone()
             self.assertEqual(stored[0],"3.0.0"); self.assertEqual(stored[1],"v3.0"); self.assertEqual(len(stored[2]),64)
             quote=con.execute("SELECT source,decimal_odds,match_confidence,is_best FROM v3_quotes").fetchone()
