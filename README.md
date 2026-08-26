@@ -1,330 +1,256 @@
 # Football Value Betting
 
-Windows desktop research application for independently estimating football probabilities, scanning executable prices and testing whether apparent value survives chronological out-of-sample validation.
+Windows desktop research application for building **bookmaker-independent football probabilities**, comparing those frozen probabilities with executable prices, and measuring whether apparent value survives chronological out-of-sample validation.
 
 ## Current version
 
 **V3.0.0**
 
-V3 is a research-first rebuild of the V2.4 independent-probability architecture. It deliberately separates three questions:
+V3 is a research architecture, not a claim that a profitable betting edge has already been proven. The application deliberately separates forecasting evidence from betting-edge evidence.
+
+## What changed in V3
+
+V3 uses a single current architecture with a clean forecast → execution → validation pipeline:
 
 ```text
-1. FOOTBALL FORECAST
-   historical results only
-          ↓
-   dynamic football state
-          ↓
-   calibrated independent H / D / A probability + uncertainty
-
-2. EXECUTION
-   freeze probability
-          ↓
-   scan every supported fixture across available books/exchanges
-          ↓
-   validate event identity + quote freshness
-          ↓
-   calculate EV at every observed price
-
-3. VALIDATION
-   point-in-time forecast/quote snapshots
-          ↓
-   chronological walk-forward replay
-          ↓
-   log loss / Brier / calibration + later closing-line/outcome evidence
+historical football results
+        ↓
+chronological dynamic attack / defence state
+        +
+separate Elo model family
+        ↓
+chronological stack-weight selection
+        ↓
+chronological probability calibration
+        ↓
+P_independent(H/D/A)
+        ↓
+moving-block bootstrap uncertainty
+        ↓
+FREEZE probability
+        ↓
+scan EVERY independently modelled fixture across ALL available execution feeds
+        ↓
+strict event/entity/freshness checks
+        ↓
+EV + uncertainty-aware research candidate
+        ↓
+append immutable forecast / quote / decision record
+        ↓
+walk-forward validation + outcome / sharp-close research
 ```
 
-A displayed positive EV is **not described as a demonstrated betting edge**. V3 calls it a research candidate until the separate forecasting and betting-edge validation gates have enough evidence.
+### 1. Dynamic football state instead of 90/180/360 duplicate models
 
-## What V3 changes
+The primary football component is now a score-driven dynamic model. Each league maintains evolving latent:
 
-### Dynamic independent football model
+- attacking strength;
+- defensive strength;
+- home scoring environment;
+- away scoring environment;
+- draw environment.
 
-The old 90/180/360-day pseudo-ensemble is replaced by two genuinely different independent model families:
+Parameters update sequentially from results. Recent information enters through state evolution rather than a separate last-five form score.
 
-- a dynamic Poisson/Dixon-Coles score model with evolving team attack and defence;
-- a league-local Elo rating model.
+### 2. Genuinely distinct auxiliary model
 
-The dynamic model updates chronologically from results, estimates the league scoring environment and applies season regression. Current bookmaker prices never enter either independent component.
+Elo remains as a second model family. Every unseen team starts from the same league-average Elo prior.
 
-All unseen Elo teams now start from the same 1500 prior, removing the ordering-dependent V2.4 initialisation anomaly.
+V3 does **not** count short/long copies of the same goal model as extra independent evidence.
 
-### Chronologically learned stacking and calibration
+### 3. Chronological stack tuning and calibration
 
-V3 no longer equal-weights several correlated goal-model variants.
+The dynamic model and Elo model are combined with a non-negative two-model stack. The dynamic weight and calibration temperature are selected on a trailing chronological validation period built only from matches before the current decision time.
 
-For each league, a small regularised candidate grid is selected using only earlier chronological validation data. V3 learns:
+No random train/test shuffle is used.
 
-- dynamic-state learning/decay settings;
-- Elo K/home-advantage settings;
-- the convex Dynamic/Elo stack weight;
-- a probability-temperature calibration parameter.
+### 4. Real uncertainty layer
 
-These settings are selected on past data only. Current prices and future results are excluded.
-
-### Proper model uncertainty
-
-V2.4's `conservative_probability = minimum(component probability)` is removed from V3 decision logic.
-
-V3 instead uses moving-block bootstrap refits of the chronological match history and reports:
+V3 refits the football state across moving-block bootstrap samples and stores coherent H/D/A uncertainty summaries:
 
 - central probability;
-- 5th percentile probability;
-- 95th percentile probability;
-- bootstrap standard deviation;
-- central EV;
-- 5th-percentile EV;
-- estimated `P(EV > 0)`.
+- 5th percentile;
+- 95th percentile;
+- bootstrap standard deviation.
 
-The block bootstrap preserves local stretches of match history rather than treating every fixture as an independent random observation.
+The decision layer reports central EV, 5th-percentile EV and an estimated `P(EV > 0)`.
 
-### Promotion/relegation strength transfer
+### 5. Promotion/relegation transfer prior
 
-For supported connected divisions, a club can carry a shrinkage-weighted prior from the lower division instead of being reset to an entirely generic top-flight prior.
+Where an adjacent lower-division history is available, a newly promoted or sparsely observed club can retain a strongly shrunk prior from that previous division rather than being treated as a completely generic new team. The transfer remains deliberately conservative and increases uncertainty until enough V3 transition history exists for a fully learned cross-division mapping.
 
-The current transfer graph covers the available paired divisions in England, Scotland, Germany, Italy, Spain and France. Transferred priors are deliberately uncertain and cannot automatically receive the highest confidence label.
+### 6. Price-shop every modelled fixture before ranking
 
-### Price-shop every modelled fixture before ranking
+V3 price-shops every independently modelled fixture before any EV ranking, preventing execution-source censoring.
 
-V3 removes the V2.4 top-N execution filter.
-
-The old path was effectively:
+The rule is now:
 
 ```text
 independent probability
-    ↓
-rank using Sportsbet EV
-    ↓
-scan only leading fixtures at other books
-```
-
-V3 is:
-
-```text
-independent probability
-    ↓
-ALL independently modelled fixtures
-    ↓
-complete available quote matrix
-    ↓
-identity/freshness checks
-    ↓
-EV for every side/book
-    ↓
+        ↓
+ALL supported current fixtures
+        ↓
+ALL available execution sources
+        ↓
+validate event identity
+        ↓
+calculate every side / book EV
+        ↓
 rank only now
 ```
 
-This means a fixture is not excluded merely because Sportsbet has a poor price while another execution source has a good one.
+The all-book scan currently uses the additional bookmaker feeds exposed through the user's PulseScore access, plus Sportsbet and fee-adjusted Polymarket where available.
 
-### Hardened event matching
+### 7. Strict event matching
 
-A quote cannot enter V3 EV merely because two fuzzy names look approximately similar.
+Execution matching now rejects rather than guesses when identity is uncertain.
 
-The V3 execution matcher uses:
+V3 requires:
 
-- league resolution before event matching;
-- home and away identity checks separately;
-- home/away orientation validation;
-- a 90-minute kickoff tolerance instead of the old eight-hour window;
-- ambiguity rejection where multiple candidate events are too close;
-- rejection of in-play events from the pre-match scan.
+- a tight 90-minute kickoff tolerance;
+- strong home-team and away-team identity agreement;
+- correct home/away orientation;
+- unambiguous league resolution;
+- no near-tied event candidate.
 
-False negatives are preferred to false positive event matches.
+A false negative is preferable to a phantom +EV price attached to the wrong fixture.
 
-### Quote microstructure
+### 8. Quote microstructure is stored
 
-Where supplied by the source, V3 quote records can store:
+V3 quote records can retain:
 
 - source;
 - side;
 - decimal odds;
-- receive time;
-- market timestamp;
-- quote age;
-- liquidity;
-- available size;
-- commission;
-- line;
+- receive timestamp;
+- provider market timestamp;
+- quote age when derivable;
+- liquidity/available size where supplied;
+- commission/line fields where supplied;
 - provider event ID;
-- event-match confidence.
+- match-confidence score;
+- whether the quote was the best observed price.
 
-Sportsbet and fee-adjusted Polymarket prices remain base execution comparisons. The additional PulseScore bookmaker feeds are opportunistic and depend on the user's API access.
+### 9. Walk-forward validation
 
-## Chronological walk-forward validation
+The new **Research → Walk-forward** page runs expanding-window chronological replay.
 
-V3 adds an expanding-window replay engine.
+Each fold:
 
-```text
-train history
-    ↓
-predict untouched period A
-    ↓
-train history + A
-    ↓
-predict untouched period B
-    ↓
-repeat
-```
+1. uses only earlier matches;
+2. tunes the model on prior information;
+3. forecasts the next untouched period;
+4. updates only after outcomes become available;
+5. predicts same-day fixtures as a batch before admitting any same-day result.
 
-There is no random train/test shuffle.
+Reported metrics include:
 
-Matches on the same calendar day are predicted as a batch before any result from that day is allowed to update the state. This prevents an earlier row on a date from leaking its result into another fixture on the same date when historical data lacks precise decision timestamps.
+- multiclass log loss (primary forecasting score);
+- Brier score;
+- calibration error;
+- home/draw/away binary log loss;
+- out-of-sample sample size and fold count.
 
-The primary forecasting metrics are:
+### 10. Forecast gate and betting-edge gate are separate
 
-- multiclass log loss;
-- multiclass Brier score;
-- probability calibration error;
-- outcome-specific binary log loss.
+A strong current price is labelled a **V3 research candidate**, not a proven bet.
 
-The live application runs a bounded recent-fold diagnostic so refreshes remain usable. The underlying validator can run a longer historical study separately.
+A candidate may require:
 
-## Immutable V3 research records
-
-V3 adds dedicated SQLite tables for:
-
-### Forecasts
-
-- event identity and kickoff;
-- decision/capture time;
-- V3 model version;
-- Git commit when available;
-- feature-schema version;
-- feature snapshot hash;
-- independent H/D/A probabilities;
-- bootstrap intervals and standard deviation;
-- dynamic-model and Elo component probabilities;
-- goal intensities;
-- stack weight and calibration temperature;
-- history/sample evidence;
-- promotion-prior flags;
-- decision-time market reference.
-
-### Quotes
-
-Every observed execution quote can be retained with its microstructure fields rather than only saving the winning price.
-
-### Decisions
-
-V3 stores the exact probability, uncertainty, execution price, central/lower EV, `P(EV>0)`, confidence and research-candidate status used at the decision timestamp.
-
-### Validation
-
-Out-of-sample predictions and aggregate validation runs are persisted separately from current forecasts.
-
-### Outcomes and sharp lines
-
-V3 also provides dedicated stores for settled outcomes and point-in-time sharp-market observations so repeated collection can build T-24h / T-6h / T-1h / T-10m / final-pre-kickoff trajectories and later calculate genuine CLV.
-
-## Decision labels
-
-V3 deliberately avoids the old implication that model agreement proves robustness.
-
-### V3 HIGH-CONFIDENCE CANDIDATE
-
-Requires, at the observed price:
-
-- central EV at or above the configured threshold;
-- 5th-percentile EV above zero;
-- estimated `P(EV > 0)` at least 90%;
+- configured central EV threshold;
+- positive 5th-percentile EV;
+- high estimated probability that EV is positive;
 - medium/high football-model confidence;
-- high-confidence event matching.
+- high execution-event match confidence.
 
-This is still a **research candidate**, not a claim that the strategy has demonstrated a sustainable edge.
+That still does **not** prove a sustainable edge. V3 stores the data needed to later test closing-line value and realised outcomes separately.
 
-### V3 +EV CANDIDATE — UNCERTAINTY
+## Research database
 
-The point estimate clears the threshold but the uncertainty evidence is weaker.
+V3 adds append-only SQLite research tables for:
 
-### POSITIVE — BELOW V3 THRESHOLD / NEGATIVE EV
+- `v3_forecasts` — model version, feature schema/hash, independent probabilities, uncertainty and component outputs;
+- `v3_quotes` — all observed execution quotes and available microstructure;
+- `v3_decisions` — point-in-time candidate decisions;
+- `v3_outcomes` — settled scores/outcomes;
+- `v3_sharp_lines` — sharp-market observations such as T-24h, T-6h, T-1h, T-10m and final pre-kickoff references;
+- `v3_validation_runs` and `v3_validation_predictions` — reproducible chronological OOS model evidence.
 
-Shown explicitly rather than hidden.
+The storage module exposes explicit outcome and sharp-line recording functions so later collection jobs can join those observations without rewriting the original forecast.
 
-## Dashboard and navigation
+## UI
 
-V3 keeps the condensed main navigation:
+The mature condensed navigation remains:
 
-- Dashboard
-- Markets
-- Analysis
-- Tools
-- Research
-- Settings
+- **Dashboard** — clearest current research candidate and live progress;
+- **Markets** — fixtures, league coverage and all-book best prices;
+- **Analysis** — candidates, market diagnostics, team context and the V3 independent model;
+- **Tools** — Dutch calculator;
+- **Research** — walk-forward validation, history and diagnostics;
+- **Settings** — operational controls and one consolidated V3 model explanation.
 
-Older version-specific analysis/validation pages still exist in the source for backwards compatibility but are hidden from the V3 navigation where they duplicate the new V3 pages.
+The Dashboard loading panel continues to show stage, detail, percentage, elapsed time and estimated time remaining while network/model work runs in background threads/processes.
 
-The active **Analysis → Independent model** page shows:
+## Important terminology
 
-- V3 H/D/A probability;
-- 5th-percentile H/D/A probability;
-- fair odds;
-- Dynamic and Elo components;
-- model goal intensities;
-- learned stack weight;
-- calibration temperature;
-- decision-time market reference and residual;
-- data/confidence evidence.
+`Goal intensity` means the model's expected scoring rate (Poisson λ). It is **not shot-derived expected goals (xG)**.
 
-The active **Research → Walk-forward** page shows the recent chronological out-of-sample log loss, Brier and calibration metrics by league and pooled across supported leagues.
+Shot-based xG/xGA and player/expected-XI data remain research inputs to be added to the V3 state only after point-in-time coverage is sufficiently complete to run a clean chronological ablation. V3 deliberately does not fabricate those inputs from goals or market prices.
 
-The live Dashboard progress panel continues to show the current analysis stage, detail, progress percentage and elapsed/estimated remaining time while API calls, modelling, quote scanning, validation and persistence run.
+## Run from source
 
-## What V3 intentionally does not fake
+Requirements:
 
-Several high-potential ideas remain research-gated rather than being forced into production without suitable point-in-time data:
+- Python 3.12 recommended;
+- Windows is the primary packaged target.
 
-- genuine shot-derived xG/xGA across all covered leagues;
-- expected-XI/player-value modelling;
-- a sharp-market residual/hybrid production probability;
-- adaptive uncertainty-aware staking/Kelly sizing.
-
-The repository already contains earlier EPL football-intelligence research scaffolding, but V3 does not silently promote incomplete or inconsistently timestamped xG/player inputs into the headline independent probability.
-
-The next scientific admission rule is simple: a new component should enter the production probability only if it improves untouched chronological forecasts, and a betting rule should only be promoted after its point-in-time EV also produces credible positive closing-line/economic evidence after costs.
-
-## Model terminology
-
-`Goal intensity` means the model-implied expected scoring rate (lambda). It is **not** shot-derived expected goals (xG).
-
-## Data sources
-
-The application currently relies on the sources already supported by the repository and the user's access, including:
-
-- Football-Data historical result files for independent model history;
-- Sportsbet via PulseScore for current target/execution prices;
-- Pinnacle/PS3838 and Asian lines where available for market diagnostics;
-- Polymarket where matched and liquid enough to be useful;
-- Bet365, Ladbrokes, TAB, Unibet AU, BetRight, Stake and Cloudbet feeds where the user's PulseScore plan exposes them.
-
-Current market information remains outside `P_independent`.
-
-## Running from source
+Install:
 
 ```bash
-python -m pip install -r requirements.txt
-python app/launcher_v3.py
+pip install -r requirements.txt
 ```
 
-Run the automated test suite:
+Run:
+
+```bash
+python app/launcher.py
+```
+
+Run tests:
 
 ```bash
 python -m unittest discover -s tests -v
 ```
 
-Run the V3 frozen-compatible self-test path:
+Run the packaged/frozen self-test path from source:
 
 ```bash
-python app/launcher_v3.py --self-test
+python app/launcher.py --self-test
 ```
 
-## Windows build
+## Build and release
 
-GitHub Actions builds:
+GitHub Actions:
 
-- `EPL-Value-Betting-v3.0.0-Setup.exe`
-- `EPL-Value-Betting-v3.0.0-Portable.exe`
+1. installs dependencies;
+2. runs the complete unit-test suite;
+3. builds the canonical `app/launcher.py` with PyInstaller;
+4. runs the frozen V3 self-test;
+5. builds the Inno Setup installer;
+6. uploads portable/setup artefacts;
+7. publishes the release when the build runs on `main`.
 
-The workflow runs the full unit-test suite and then launches the frozen executable with `--self-test` before producing the installer artefacts.
+## Current research limitations
 
-## Research warning
+V3 removes several objective architectural errors, but it should not be described as a statistically proven profitable system yet.
 
-This project is an analysis/research tool. Estimated probabilities and positive expected value are model outputs, not guarantees of future performance. Prices move, markets suspend, liquidity and stake limits matter, and a probability model can be wrong or miscalibrated even when its mathematics and software are functioning as designed.
+In particular:
+
+- historical Football-Data rows are often date-level rather than true decision-time records; V3 mitigates same-day leakage by batching same-day replay but exact archived kickoff timestamps are preferable;
+- block-bootstrap uncertainty is materially stronger than component minima, but its coverage still needs empirical OOS checking;
+- promotion priors are partially pooled, not yet a fully estimated multi-division Bayesian transition model;
+- shot-derived xG and expected-XI/player strength are not yet broad, point-in-time production inputs;
+- the sharp-market residual/hybrid production model is intentionally not switched on until sufficient decision-time sharp snapshots exist;
+- no current label should be interpreted as evidence of guaranteed profit.
+
+These are research backlog items, not reasons to leak current bookmaker prices back into the independent football model.
