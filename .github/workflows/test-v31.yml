@@ -1,0 +1,28 @@
+name: V3.1 validity tests
+
+on:
+  push:
+    branches:
+      - v3.1/research-validity
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run complete test suite
+        shell: pwsh
+        run: python -m unittest discover -s tests -v
+      - name: Run V3 frozen-path smoke test from source
+        shell: pwsh
+        run: python app/launcher.py --self-test
